@@ -1,0 +1,27 @@
+# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
+# Ignore build artifacts
+bin/
+dist/
+
+# Ignore test files
+*_test.go
+test/
+
+# Ignore config directories
+config/
+
+# Ignore charts
+charts/
+
+# Ignore development files
+.git/
+.github/
+.idea/
+.vscode/
+*.md
+
+# Ignore container-related files
+Containerfile
+.containerignore
+Makefile
+.golangci.yaml

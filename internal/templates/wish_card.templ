@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2025 Aleksei Sviridkin
+
+package templates
+
+import (
+	"fmt"
+
+	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+)
+
+func stars(priority int32) string {
+	filled := int(priority)
+	if filled > 5 {
+		filled = 5
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return repeatRune('★', filled) + repeatRune('☆', 5-filled)
+}
+
+func repeatRune(r rune, count int) string {
+	result := make([]rune, count)
+	for i := range result {
+		result[i] = r
+	}
+	return string(result)
+}
+
+templ WishCard(wish *wishlistv1alpha1.Wish) {
+	<div id={ fmt.Sprintf("wish-%s", wish.Name) } class={ "wish-card", templ.KV("reserved", wish.Status.Reserved) }>
+		if wish.Spec.ImageURL != "" {
+			<img src={ wish.Spec.ImageURL } alt={ wish.Spec.Title }/>
+		}
+		<h2>
+			if wish.Spec.ProductURL != "" {
+				<a href={ templ.SafeURL(wish.Spec.ProductURL) } target="_blank">{ wish.Spec.Title }</a>
+			} else {
+				{ wish.Spec.Title }
+			}
+		</h2>
+		if wish.Spec.MSRP != "" {
+			<div class="price">{ wish.Spec.MSRP }</div>
+		}
+		if wish.Spec.Priority > 0 {
+			<div class="stars">{ stars(wish.Spec.Priority) }</div>
+		}
+		<div class="tags">
+			for _, tag := range wish.Spec.Tags {
+				<span class="tag">{ tag }</span>
+			}
+			for _, tag := range wish.Spec.ContextTags {
+				<span class="tag context-tag">{ tag }</span>
+			}
+		</div>
+		if wish.Spec.Description != "" {
+			<div class="description">{ wish.Spec.Description }</div>
+		}
+		if wish.Status.Reserved {
+			<div class="reserved-badge">Reserved</div>
+		} else {
+			<form
+				class="reserve-form"
+				hx-post={ fmt.Sprintf("/wishes/%s/reserve", wish.Name) }
+				hx-target={ fmt.Sprintf("#wish-%s", wish.Name) }
+				hx-swap="outerHTML"
+			>
+				<select name="weeks" required>
+					<option value="1">1 week</option>
+					<option value="2">2 weeks</option>
+					<option value="3">3 weeks</option>
+					<option value="4" selected>4 weeks</option>
+					<option value="5">5 weeks</option>
+					<option value="6">6 weeks</option>
+					<option value="7">7 weeks</option>
+					<option value="8">8 weeks</option>
+				</select>
+				<button type="submit">Reserve</button>
+			</form>
+		}
+	</div>
+}

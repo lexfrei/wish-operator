@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2025 Aleksei Sviridkin
+
+package templates
+
+import (
+	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+)
+
+templ Index(wishes []wishlistv1alpha1.Wish) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>Wishlist</title>
+			<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+			<style>
+				* { box-sizing: border-box; margin: 0; padding: 0; }
+				body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; padding: 2rem; }
+				.container { max-width: 1200px; margin: 0 auto; }
+				h1 { text-align: center; margin-bottom: 2rem; color: #333; }
+				.wishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+				.wish-card { background: white; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+				.wish-card.reserved { opacity: 0.7; }
+				.wish-card img { width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem; }
+				.wish-card h2 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+				.wish-card .price { font-size: 1.5rem; font-weight: bold; color: #2563eb; margin-bottom: 0.5rem; }
+				.wish-card .stars { color: #fbbf24; margin-bottom: 0.5rem; }
+				.wish-card .tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+				.wish-card .tag { background: #e5e7eb; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; }
+				.wish-card .context-tag { background: #dbeafe; color: #1d4ed8; }
+				.wish-card .description { color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem; }
+				.wish-card .reserve-form { display: flex; gap: 0.5rem; }
+				.wish-card select, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #d1d5db; }
+				.wish-card button { background: #2563eb; color: white; border: none; cursor: pointer; }
+				.wish-card button:hover { background: #1d4ed8; }
+				.wish-card .reserved-badge { background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; border-radius: 6px; text-align: center; }
+				.empty { text-align: center; color: #6b7280; padding: 4rem; }
+			</style>
+		</head>
+		<body>
+			<div class="container">
+				<h1>Wishlist</h1>
+				<div id="wishes" class="wishes">
+					@WishList(wishes)
+				</div>
+			</div>
+		</body>
+	</html>
+}

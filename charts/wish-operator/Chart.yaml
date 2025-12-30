@@ -1,0 +1,9 @@
+apiVersion: v2
+name: wish-operator
+description: Kubernetes operator for managing wishlists
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: Aleksei Sviridkin
+    email: f@lex.la

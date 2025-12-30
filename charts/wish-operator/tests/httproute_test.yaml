@@ -1,0 +1,197 @@
+suite: httproute tests
+templates:
+  - httproute.yaml
+tests:
+  # Disabled by default
+  - it: should not create HTTPRoute by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create HTTPRoute when explicitly disabled
+    set:
+      httpRoute:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Basic creation
+  - it: should create HTTPRoute when enabled
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: HTTPRoute
+      - isAPIVersion:
+          of: gateway.networking.k8s.io/v1
+
+  - it: should have correct name
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should use fullnameOverride
+    set:
+      httpRoute:
+        enabled: true
+      fullnameOverride: my-route
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-route
+
+  - it: should have correct labels
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: wish-operator
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+
+  # Parent refs
+  - it: should have parentRefs when configured
+    set:
+      httpRoute:
+        enabled: true
+        parentRefs:
+          - name: my-gateway
+            namespace: gateway-ns
+    asserts:
+      - contains:
+          path: spec.parentRefs
+          content:
+            name: my-gateway
+            namespace: gateway-ns
+
+  - it: should support multiple parentRefs
+    set:
+      httpRoute:
+        enabled: true
+        parentRefs:
+          - name: gateway-1
+          - name: gateway-2
+            sectionName: https
+    asserts:
+      - lengthEqual:
+          path: spec.parentRefs
+          count: 2
+
+  - it: should not have parentRefs when not configured
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - isNull:
+          path: spec.parentRefs
+
+  # Hostnames
+  - it: should have hostnames when configured
+    set:
+      httpRoute:
+        enabled: true
+        hostnames:
+          - wishlist.example.com
+          - wishes.example.com
+    asserts:
+      - contains:
+          path: spec.hostnames
+          content: wishlist.example.com
+      - contains:
+          path: spec.hostnames
+          content: wishes.example.com
+
+  - it: should not have hostnames when not configured
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - isNull:
+          path: spec.hostnames
+
+  # Rules
+  - it: should have path prefix rule
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].matches[0].path.type
+          value: PathPrefix
+      - equal:
+          path: spec.rules[0].matches[0].path.value
+          value: /
+
+  - it: should reference correct service
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should use correct service port
+    set:
+      httpRoute:
+        enabled: true
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 8080
+
+  - it: should use custom service port
+    set:
+      httpRoute:
+        enabled: true
+      service:
+        port: 9090
+    asserts:
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 9090
+
+  # Full configuration
+  - it: should work with full configuration
+    set:
+      httpRoute:
+        enabled: true
+        parentRefs:
+          - name: main-gateway
+            namespace: gateway-system
+            sectionName: https
+        hostnames:
+          - wishlist.lex.la
+      fullnameOverride: wishlist
+      service:
+        port: 8080
+    asserts:
+      - equal:
+          path: metadata.name
+          value: wishlist
+      - contains:
+          path: spec.parentRefs
+          content:
+            name: main-gateway
+            namespace: gateway-system
+            sectionName: https
+      - contains:
+          path: spec.hostnames
+          content: wishlist.lex.la
+      - equal:
+          path: spec.rules[0].backendRefs[0].name
+          value: wishlist
+      - equal:
+          path: spec.rules[0].backendRefs[0].port
+          value: 8080

@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "wish-operator.fullname" . }}
+  labels:
+    {{- include "wish-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - wishlist.k8s.lex.la
+    resources:
+      - wishes
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - wishlist.k8s.lex.la
+    resources:
+      - wishes/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - wishlist.k8s.lex.la
+    resources:
+      - wishes/finalizers
+    verbs:
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "wish-operator.fullname" . }}
+  labels:
+    {{- include "wish-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "wish-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "wish-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

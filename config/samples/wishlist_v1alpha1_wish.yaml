@@ -1,0 +1,9 @@
+apiVersion: wishlist.k8s.lex.la/v1alpha1
+kind: Wish
+metadata:
+  labels:
+    app.kubernetes.io/name: wish-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: wish-sample
+spec:
+  # TODO(user): Add fields here
