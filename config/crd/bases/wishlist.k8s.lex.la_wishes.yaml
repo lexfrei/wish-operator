@@ -53,15 +53,21 @@ spec:
               msrp:
                 description: MSRP is the price display string (e.g., "₽ 19900").
                 type: string
+              officialURL:
+                description: OfficialURL is the link to the official product page.
+                type: string
               priority:
                 description: Priority indicates importance (1-5, displayed as stars).
                 format: int32
                 maximum: 5
                 minimum: 0
                 type: integer
-              productURL:
-                description: ProductURL is the link to purchase the item.
-                type: string
+              purchaseURLs:
+                description: PurchaseURLs is a list of links where the item can be
+                  purchased.
+                items:
+                  type: string
+                type: array
               tags:
                 description: Tags are category labels for the wish.
                 items:
