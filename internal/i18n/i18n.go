@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Supported languages.
@@ -132,4 +133,16 @@ func weeksRussian(n int) string {
 func weeksChinese(_ int) string {
 	// Chinese doesn't have plural forms
 	return T(LangZH, "weeks_format")
+}
+
+// FormatDate formats a date according to the language.
+func FormatDate(lang string, date time.Time) string {
+	switch lang {
+	case LangRU:
+		return date.Format("02.01.2006")
+	case LangZH:
+		return date.Format("2006年01月02日") //nolint:gosmopolitan // Chinese date format
+	default:
+		return date.Format("Jan 2, 2006")
+	}
 }

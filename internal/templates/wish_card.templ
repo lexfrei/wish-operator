@@ -67,7 +67,12 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 			</div>
 		}
 		if wish.Status.Reserved {
-			<div class="reserved-badge">{ i18n.T(lang, "reserved_badge") }</div>
+			<div class="reserved-badge">
+				{ i18n.T(lang, "reserved_badge") }
+				if wish.Status.ReservationExpires != nil {
+					<div class="reserved-until">{ fmt.Sprintf(i18n.T(lang, "reserved_until"), i18n.FormatDate(lang, wish.Status.ReservationExpires.Time)) }</div>
+				}
+			</div>
 		} else {
 			<form
 				class="reserve-form"
