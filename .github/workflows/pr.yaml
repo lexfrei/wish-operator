@@ -128,7 +128,7 @@ jobs:
 
       - name: Install tools
         run: |
-          helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git
           pip install check-jsonschema
 
       - name: Run Helm Lint
@@ -138,7 +138,7 @@ jobs:
         run: |
           CHART_DIR="charts/wish-operator"
           if [ -d "$CHART_DIR/tests" ]; then
-            helm unittest "$CHART_DIR" --color=always --with-subchart=false
+            helm unittest "$CHART_DIR" --with-subchart=false --color
           else
             echo "No tests directory found, skipping unit tests"
           fi
