@@ -103,6 +103,61 @@ jobs:
           flags: unittests
           name: codecov-umbrella
 
+  lint-chart:
+    name: Lint Chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.17.3'
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.8.0
+
+      - name: Install tools
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git
+          pip install check-jsonschema
+
+      - name: Run Helm Lint
+        run: helm lint charts/wish-operator
+
+      - name: Run Helm Unittest
+        run: |
+          CHART_DIR="charts/wish-operator"
+          if [ -d "$CHART_DIR/tests" ]; then
+            helm unittest "$CHART_DIR" --color --with-subchart=false
+          else
+            echo "No tests directory found, skipping unit tests"
+          fi
+
+      - name: Run chart-testing (lint)
+        run: ct lint --charts charts/wish-operator
+
+      - name: Validate JSON Schema
+        run: |
+          CHART_DIR="charts/wish-operator"
+          if [ -f "$CHART_DIR/values.schema.json" ]; then
+            check-jsonschema --schemafile "$CHART_DIR/values.schema.json" "$CHART_DIR/values.yaml"
+          else
+            echo "No values.schema.json found, skipping schema validation"
+          fi
+
+      - name: Template Chart
+        run: helm template test-release charts/wish-operator
+
   build-and-push:
     name: Build and Push (${{ matrix.arch }})
     needs: [security, lint, test]
@@ -216,9 +271,81 @@ jobs:
             echo "> **Note:** Image expires in 24 hours (ttl.sh)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  build-chart:
+    name: Build Chart
+    runs-on: ubuntu-latest
+    needs: [security, lint, test, lint-chart]
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Modify Chart.yaml and values.yaml
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          CHART_DIR="charts/wish-operator"
+          CHART_VERSION="0.0.0-pr.${PR_NUMBER}-1d"
+          APP_VERSION="pr-${PR_NUMBER}-1d"
+          IMAGE_REPO="ttl.sh/wish-operator"
+          IMAGE_TAG="pr-${PR_NUMBER}-1d"
+
+          sed -i "s/^version: .*/version: ${CHART_VERSION}/" "${CHART_DIR}/Chart.yaml"
+          sed -i "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" "${CHART_DIR}/Chart.yaml"
+          sed -i "s|repository: .*|repository: ${IMAGE_REPO}|" "${CHART_DIR}/values.yaml"
+          sed -i "s/tag: .*/tag: \"${IMAGE_TAG}\"/" "${CHART_DIR}/values.yaml"
+
+          echo "Modified chart version: ${CHART_VERSION}"
+          echo "Modified appVersion: ${APP_VERSION}"
+          echo "Modified image: ${IMAGE_REPO}:${IMAGE_TAG}"
+
+      - name: Package chart
+        run: |
+          set -euo pipefail
+          helm package charts/wish-operator
+          ls -lh *.tgz
+
+      - name: Push chart to ttl.sh
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          CHART_VERSION="0.0.0-pr.${PR_NUMBER}-1d"
+          CHART_PKG="wish-operator-${CHART_VERSION}.tgz"
+
+          helm push "${CHART_PKG}" oci://ttl.sh
+
+          echo "Chart pushed to: oci://ttl.sh/wish-operator:${CHART_VERSION}"
+
+      - name: Generate chart summary
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          CHART_VERSION="0.0.0-pr.${PR_NUMBER}-1d"
+
+          {
+            echo "## Helm Chart"
+            echo ""
+            echo "### Chart Version"
+            echo "- \`${CHART_VERSION}\`"
+            echo ""
+            echo "### Install Command"
+            echo '```bash'
+            echo "helm install wish-operator oci://ttl.sh/wish-operator --version ${CHART_VERSION}"
+            echo '```'
+            echo ""
+            echo "> **Note:** Chart expires in 24 hours (ttl.sh)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   notify:
     name: Notify PR
-    needs: merge-manifests
+    needs: [merge-manifests, build-chart]
     runs-on: ubuntu-latest
     steps:
       - name: Check if first build
@@ -255,10 +382,11 @@ jobs:
           script: |
             const prNumber = context.payload.pull_request.number;
             const imageTag = `ttl.sh/wish-operator:pr-${prNumber}-1d`;
+            const chartVersion = `0.0.0-pr.${prNumber}-1d`;
 
             github.rest.issues.createComment({
               issue_number: prNumber,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## Container image available\n\n**Multi-arch image (amd64 + arm64):**\n\`\`\`bash\npodman pull ${imageTag}\n\`\`\`\n\n> **Note:** Image is rebuilt on every commit and expires after 24 hours (hosted on ttl.sh).`
+              body: `## Container image available\n\n**Multi-arch image (amd64 + arm64):**\n\`\`\`bash\npodman pull ${imageTag}\n\`\`\`\n\n## Helm chart available\n\n**Install chart:**\n\`\`\`bash\nhelm install wish-operator oci://ttl.sh/wish-operator --version ${chartVersion}\n\`\`\`\n\n> **Note:** Image and chart are rebuilt on every commit and expire after 24 hours (hosted on ttl.sh).`
             })
