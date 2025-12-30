@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
 )
 
 func stars(priority int32) string {
@@ -28,7 +29,7 @@ func repeatRune(r rune, count int) string {
 	return string(result)
 }
 
-templ WishCard(wish *wishlistv1alpha1.Wish) {
+templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 	<div id={ fmt.Sprintf("wish-%s", wish.Name) } class={ "wish-card", templ.KV("reserved", wish.Status.Reserved) }>
 		if wish.Spec.ImageURL != "" {
 			<img src={ wish.Spec.ImageURL } alt={ wish.Spec.Title }/>
@@ -59,32 +60,32 @@ templ WishCard(wish *wishlistv1alpha1.Wish) {
 		}
 		if len(wish.Spec.PurchaseURLs) > 0 {
 			<div class="purchase-links">
-				<span>Buy:</span>
+				<span>{ i18n.T(lang, "buy_label") }</span>
 				for i, url := range wish.Spec.PurchaseURLs {
 					<a href={ templ.SafeURL(url) } target="_blank">{ fmt.Sprintf("[%d]", i+1) }</a>
 				}
 			</div>
 		}
 		if wish.Status.Reserved {
-			<div class="reserved-badge">Reserved</div>
+			<div class="reserved-badge">{ i18n.T(lang, "reserved_badge") }</div>
 		} else {
 			<form
 				class="reserve-form"
-				hx-post={ fmt.Sprintf("/wishes/%s/reserve", wish.Name) }
+				hx-post={ fmt.Sprintf("/wishes/%s/reserve?lang=%s", wish.Name, lang) }
 				hx-target={ fmt.Sprintf("#wish-%s", wish.Name) }
 				hx-swap="outerHTML"
 			>
 				<select name="weeks" required>
-					<option value="1">1 week</option>
-					<option value="2">2 weeks</option>
-					<option value="3">3 weeks</option>
-					<option value="4" selected>4 weeks</option>
-					<option value="5">5 weeks</option>
-					<option value="6">6 weeks</option>
-					<option value="7">7 weeks</option>
-					<option value="8">8 weeks</option>
+					<option value="1">{ fmt.Sprintf("1 %s", i18n.T(lang, "week_one")) }</option>
+					<option value="2">{ fmt.Sprintf("2 %s", i18n.Weeks(lang, 2)) }</option>
+					<option value="3">{ fmt.Sprintf("3 %s", i18n.Weeks(lang, 3)) }</option>
+					<option value="4" selected>{ fmt.Sprintf("4 %s", i18n.Weeks(lang, 4)) }</option>
+					<option value="5">{ fmt.Sprintf("5 %s", i18n.Weeks(lang, 5)) }</option>
+					<option value="6">{ fmt.Sprintf("6 %s", i18n.Weeks(lang, 6)) }</option>
+					<option value="7">{ fmt.Sprintf("7 %s", i18n.Weeks(lang, 7)) }</option>
+					<option value="8">{ fmt.Sprintf("8 %s", i18n.Weeks(lang, 8)) }</option>
 				</select>
-				<button type="submit">Reserve</button>
+				<button type="submit">{ i18n.T(lang, "reserve_btn") }</button>
 			</form>
 		}
 	</div>

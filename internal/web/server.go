@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
 	"github.com/lexfrei/wish-operator/internal/templates"
 
 	"golang.org/x/time/rate"
@@ -58,53 +61,60 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	wishes, err := s.listWishes(r.Context())
-	if err != nil {
-		http.Error(w, "Failed to list wishes", http.StatusInternalServerError)
-
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	if err := templates.Index(wishes).Render(r.Context(), w); err != nil {
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
+	s.renderWishPage(w, r, true)
 }
 
 func (s *Server) handleWishes(w http.ResponseWriter, r *http.Request) {
-	wishes, err := s.listWishes(r.Context())
+	s.renderWishPage(w, r, false)
+}
+
+func (s *Server) renderWishPage(w http.ResponseWriter, r *http.Request, fullPage bool) {
+	lang := i18n.DetectLanguage(r)
+	filterTag := r.URL.Query().Get("tag")
+
+	wishes, allTags, err := s.listWishes(r.Context(), filterTag)
 	if err != nil {
-		http.Error(w, "Failed to list wishes", http.StatusInternalServerError)
+		http.Error(w, i18n.T(lang, "err_list_wishes"), http.StatusInternalServerError)
 
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := templates.WishList(wishes).Render(r.Context(), w); err != nil {
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	var renderErr error
+
+	if fullPage {
+		renderErr = templates.Index(wishes, allTags, filterTag, lang).Render(r.Context(), w)
+	} else {
+		renderErr = templates.WishContent(wishes, allTags, filterTag, lang).Render(r.Context(), w)
+	}
+
+	if renderErr != nil {
+		http.Error(w, i18n.T(lang, "err_render"), http.StatusInternalServerError)
+
+		return
 	}
 }
 
 func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
+	lang := i18n.DetectLanguage(r)
 	name := r.PathValue("name")
+
 	if name == "" {
-		http.Error(w, "Missing wish name", http.StatusBadRequest)
+		http.Error(w, i18n.T(lang, "err_missing_name"), http.StatusBadRequest)
 
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		http.Error(w, i18n.T(lang, "err_invalid_form"), http.StatusBadRequest)
 
 		return
 	}
 
-	weeksStr := r.FormValue("weeks")
-	weeks, err := strconv.Atoi(weeksStr)
+	weeks, err := strconv.Atoi(r.FormValue("weeks"))
 	if err != nil || weeks < minWeeks || weeks > maxWeeks {
-		http.Error(w, fmt.Sprintf("Weeks must be between %d and %d", minWeeks, maxWeeks), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf(i18n.T(lang, "err_weeks_range"), minWeeks, maxWeeks), http.StatusBadRequest)
 
 		return
 	}
@@ -112,18 +122,18 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 	wish := &wishlistv1alpha1.Wish{}
 	if err := s.client.Get(r.Context(), client.ObjectKey{Name: name, Namespace: s.namespace}, wish); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			http.Error(w, "Wish not found", http.StatusNotFound)
+			http.Error(w, i18n.T(lang, "err_not_found"), http.StatusNotFound)
 
 			return
 		}
 
-		http.Error(w, "Failed to get wish", http.StatusInternalServerError)
+		http.Error(w, i18n.T(lang, "err_get_wish"), http.StatusInternalServerError)
 
 		return
 	}
 
 	if wish.Status.Reserved {
-		http.Error(w, "Wish is already reserved", http.StatusConflict)
+		http.Error(w, i18n.T(lang, "err_already_reserved"), http.StatusConflict)
 
 		return
 	}
@@ -136,34 +146,71 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 	wish.Status.ReservationExpires = &expires
 
 	if err := s.client.Status().Update(r.Context(), wish); err != nil {
-		http.Error(w, "Failed to reserve wish", http.StatusInternalServerError)
+		http.Error(w, i18n.T(lang, "err_reserve_failed"), http.StatusInternalServerError)
 
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := templates.WishCard(wish).Render(r.Context(), w); err != nil {
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
+	if err := templates.WishCard(wish, lang).Render(r.Context(), w); err != nil {
+		http.Error(w, i18n.T(lang, "err_render"), http.StatusInternalServerError)
 	}
 }
 
-func (s *Server) listWishes(ctx context.Context) ([]wishlistv1alpha1.Wish, error) {
+func (s *Server) listWishes(ctx context.Context, filterTag string) ([]wishlistv1alpha1.Wish, []string, error) {
 	wishList := &wishlistv1alpha1.WishList{}
 	if err := s.client.List(ctx, wishList, client.InNamespace(s.namespace)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Filter only active wishes
-	var active []wishlistv1alpha1.Wish
+	// Collect all unique tags and filter active wishes
+	tagSet := make(map[string]struct{})
+	active := make([]wishlistv1alpha1.Wish, 0, len(wishList.Items))
 
 	for i := range wishList.Items {
-		if wishList.Items[i].Status.Active {
-			active = append(active, wishList.Items[i])
+		wish := &wishList.Items[i]
+		if !wish.Status.Active {
+			continue
 		}
+
+		// Collect all tags for filter UI
+		for _, tag := range wish.Spec.Tags {
+			tagSet[tag] = struct{}{}
+		}
+
+		for _, tag := range wish.Spec.ContextTags {
+			tagSet[tag] = struct{}{}
+		}
+
+		// Apply tag filter if specified
+		if filterTag != "" {
+			if !s.wishHasTag(wish, filterTag) {
+				continue
+			}
+		}
+
+		active = append(active, *wish)
 	}
 
-	return active, nil
+	// Sort by priority descending (highest stars first)
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].Spec.Priority > active[j].Spec.Priority
+	})
+
+	// Convert tag set to sorted slice
+	allTags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		allTags = append(allTags, tag)
+	}
+
+	sort.Strings(allTags)
+
+	return active, allTags, nil
+}
+
+func (s *Server) wishHasTag(wish *wishlistv1alpha1.Wish, tag string) bool {
+	return slices.Contains(wish.Spec.Tags, tag) || slices.Contains(wish.Spec.ContextTags, tag)
 }
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
@@ -172,7 +219,8 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		limiter := s.getLimiter(ip)
 
 		if !limiter.Allow() {
-			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			lang := i18n.DetectLanguage(r)
+			http.Error(w, i18n.T(lang, "err_rate_limit"), http.StatusTooManyRequests)
 
 			return
 		}

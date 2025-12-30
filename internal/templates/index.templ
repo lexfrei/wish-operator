@@ -5,15 +5,42 @@ package templates
 
 import (
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
 )
 
-templ Index(wishes []wishlistv1alpha1.Wish) {
+templ FilterBar(allTags []string, activeTag string, lang string) {
+	if len(allTags) > 0 {
+		<div class="filter-bar" id="filter-bar">
+			<span class="filter-label">{ i18n.T(lang, "filter_label") }</span>
+			<a
+				href="/"
+				class={ "filter-chip", templ.KV("active", activeTag == "") }
+				hx-get={ "/wishes?lang=" + lang }
+				hx-target="#wish-content"
+				hx-swap="innerHTML"
+				hx-push-url="/"
+			>{ i18n.T(lang, "filter_all") }</a>
+			for _, tag := range allTags {
+				<a
+					href={ templ.SafeURL("/?tag=" + tag) }
+					class={ "filter-chip", templ.KV("active", activeTag == tag) }
+					hx-get={ "/wishes?tag=" + tag + "&lang=" + lang }
+					hx-target="#wish-content"
+					hx-swap="innerHTML"
+					hx-push-url={ "/?tag=" + tag }
+				>{ tag }</a>
+			}
+		</div>
+	}
+}
+
+templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, lang string) {
 	<!DOCTYPE html>
-	<html lang="en">
+	<html lang={ lang }>
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<title>Wishlist</title>
+			<title>{ i18n.T(lang, "page_title") }</title>
 			<script src="https://unpkg.com/htmx.org@2.0.4"></script>
 			<style>
 				* { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,14 +66,31 @@ templ Index(wishes []wishlistv1alpha1.Wish) {
 				.wish-card button:hover { background: #1d4ed8; }
 				.wish-card .reserved-badge { background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; border-radius: 6px; text-align: center; }
 				.empty { text-align: center; color: #6b7280; padding: 4rem; }
+				.filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; align-items: center; }
+				.filter-label { font-weight: 500; color: #374151; margin-right: 0.5rem; }
+				.filter-chip { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.875rem; cursor: pointer; border: 1px solid #d1d5db; background: white; color: #374151; transition: all 0.15s; text-decoration: none; }
+				.filter-chip:hover { background: #f3f4f6; border-color: #9ca3af; }
+				.filter-chip.active { background: #2563eb; color: white; border-color: #2563eb; }
+				.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb; text-align: center; }
+				.lang-selector { display: flex; justify-content: center; gap: 1rem; }
+				.lang-selector a { font-size: 1.5rem; text-decoration: none; opacity: 0.6; transition: opacity 0.15s; }
+				.lang-selector a:hover { opacity: 1; }
+				.lang-selector a.active { opacity: 1; }
 			</style>
 		</head>
 		<body>
 			<div class="container">
-				<h1>Wishlist</h1>
-				<div id="wishes" class="wishes">
-					@WishList(wishes)
+				<h1>{ i18n.T(lang, "page_title") }</h1>
+				<div id="wish-content">
+					@WishContent(wishes, allTags, activeTag, lang)
 				</div>
+				<footer class="footer">
+					<div class="lang-selector">
+						<a href="/?lang=en" class={ templ.KV("active", lang == "en") } title="English">🇬🇧</a>
+						<a href="/?lang=ru" class={ templ.KV("active", lang == "ru") } title="Русский">🇷🇺</a>
+						<a href="/?lang=zh" class={ templ.KV("active", lang == "zh") } title="中文">🇨🇳</a>
+					</div>
+				</footer>
 			</div>
 		</body>
 	</html>
