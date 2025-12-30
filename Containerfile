@@ -1,10 +1,13 @@
-# Build stage
 FROM docker.io/library/golang:1.25-alpine AS builder
 
-ARG TARGETOS=linux
-ARG TARGETARCH
+ARG VERSION=development
+ARG REVISION=development
 
-WORKDIR /workspace
+# hadolint ignore=DL3018
+RUN echo 'nobody:x:65534:65534:Nobody:/:' > /tmp/passwd && \
+    apk add --no-cache upx ca-certificates
+
+WORKDIR /build
 
 # Install templ
 RUN go install github.com/a-h/templ/cmd/templ@latest
@@ -13,26 +16,24 @@ RUN go install github.com/a-h/templ/cmd/templ@latest
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source
+# Copy source and generate templ
 COPY . .
-
-# Generate templ files
 RUN templ generate
 
-# Build
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o manager ./cmd/
+# Build and compress
+RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.Version=${VERSION} -X main.Gitsha=${REVISION}" -trimpath -o manager ./cmd/ && \
+    upx --best --lzma manager
 
-# Runtime stage
-FROM gcr.io/distroless/static:nonroot
+FROM scratch
 
 LABEL org.opencontainers.image.source="https://github.com/lexfrei/wish-operator"
 LABEL org.opencontainers.image.description="Kubernetes operator for managing wishlists"
 LABEL org.opencontainers.image.licenses="BSD-3-Clause"
 
-WORKDIR /
-COPY --from=builder /workspace/manager .
+COPY --from=builder /tmp/passwd /etc/passwd
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder --chmod=555 /build/manager /manager
 
-USER 65532:65532
-
+USER 65534
+EXPOSE 8080/tcp 8081/tcp
 ENTRYPOINT ["/manager"]
