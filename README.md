@@ -1,135 +1,139 @@
 # wish-operator
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Kubernetes operator for managing wishlists. Create wishes as Kubernetes resources, share them via web UI, and let others reserve gifts.
 
-## Getting Started
+## Features
+
+- **Wish CRD** — define wishes with title, description, price, images, priority (1-5 stars), and tags
+- **Web UI** — HTMX-powered interface for viewing and reserving wishes
+- **Reservations** — reserve wishes for 1-8 weeks with automatic expiration
+- **TTL** — wishes can auto-expire after a defined duration
+- **Rate limiting** — per-IP rate limiting to prevent abuse
+- **Gateway API** — HTTPRoute support for ingress via Gateway API
+
+## Installation
+
+### Helm (recommended)
+
+```bash
+helm install wish-operator oci://ghcr.io/lexfrei/charts/wish-operator \
+  --namespace wish-operator \
+  --create-namespace
+```
+
+### With HTTPRoute
+
+```bash
+helm install wish-operator oci://ghcr.io/lexfrei/charts/wish-operator \
+  --namespace wish-operator \
+  --create-namespace \
+  --set httpRoute.enabled=true \
+  --set 'httpRoute.parentRefs[0].name=my-gateway' \
+  --set 'httpRoute.hostnames[0]=wishes.example.com'
+```
+
+## Usage
+
+### Create a Wish
+
+```yaml
+apiVersion: wishlist.k8s.lex.la/v1alpha1
+kind: Wish
+metadata:
+  name: mechanical-keyboard
+  namespace: wish-operator
+spec:
+  title: "Mechanical Keyboard"
+  description: "Cherry MX Brown switches"
+  msrp: "$150"
+  productURL: "https://example.com/keyboard"
+  imageURL: "https://example.com/keyboard.jpg"
+  priority: 4
+  tags:
+    - electronics
+    - office
+  contextTags:
+    - birthday
+  ttl: 720h  # 30 days
+```
+
+### Wish Spec Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `title` | string | Name of the desired item (required) |
+| `description` | string | Why you want this item |
+| `msrp` | string | Price display (e.g., "$150", "€99") |
+| `productURL` | string | Link to purchase |
+| `imageURL` | string | Product image URL |
+| `priority` | int32 | Importance 1-5 (displayed as stars) |
+| `tags` | []string | Category labels |
+| `contextTags` | []string | Occasions (birthday, christmas) |
+| `ttl` | duration | Auto-expire after this duration |
+
+### Wish Status
+
+| Field | Description |
+|-------|-------------|
+| `active` | Whether wish is within TTL |
+| `reserved` | Whether someone reserved it |
+| `reservedAt` | When it was reserved |
+| `reservationExpires` | When reservation expires |
+
+## Configuration
+
+### Helm Values
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `replicaCount` | 1 | Number of replicas |
+| `image.repository` | ghcr.io/lexfrei/wish-operator | Image repository |
+| `image.tag` | "" | Image tag (defaults to chart appVersion) |
+| `operator.namespace` | default | Namespace to watch for Wishes |
+| `operator.rateLimit` | 30 | Requests per second per IP |
+| `operator.rateBurst` | 10 | Burst size for rate limiting |
+| `httpRoute.enabled` | false | Create HTTPRoute resource |
+| `httpRoute.hostnames` | [] | Hostnames for the route |
+| `httpRoute.parentRefs` | [] | Gateway references |
+
+## Development
 
 ### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- Go 1.23+
+- kubectl
+- Helm 3
+- [helm-unittest](https://github.com/helm-unittest/helm-unittest)
 
-```sh
-make docker-build docker-push IMG=<some-registry>/wish-operator:tag
+### Build
+
+```bash
+make build
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+### Test
 
-**Install the CRDs into the cluster:**
+```bash
+# Go tests
+go test ./...
 
-```sh
-make install
+# Helm tests
+helm unittest charts/wish-operator
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+### Lint
 
-```sh
-make deploy IMG=<some-registry>/wish-operator:tag
+```bash
+golangci-lint run
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+### Run locally
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
+```bash
+make install    # Install CRDs
+make run        # Run controller locally
 ```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
-make undeploy
-```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/wish-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/wish-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+BSD-3-Clause. See [LICENSE](LICENSE).
