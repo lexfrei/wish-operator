@@ -128,7 +128,7 @@ jobs:
 
       - name: Install tools
         run: |
-          helm plugin install https://github.com/helm-unittest/helm-unittest.git
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
           pip install check-jsonschema
 
       - name: Run Helm Lint
