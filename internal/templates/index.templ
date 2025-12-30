@@ -42,41 +42,94 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ i18n.T(lang, "page_title") }</title>
 			<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+			<script>
+				(function() {
+					const theme = localStorage.getItem('theme');
+					if (theme === 'dark' || (theme === 'auto' || !theme) && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+						document.documentElement.setAttribute('data-theme', 'dark');
+					}
+				})();
+			</script>
 			<style>
+				:root {
+					--bg-primary: #f5f5f5;
+					--bg-card: #ffffff;
+					--text-primary: #333333;
+					--text-secondary: #6b7280;
+					--text-muted: #374151;
+					--border-color: #d1d5db;
+					--border-hover: #9ca3af;
+					--accent-color: #2563eb;
+					--accent-hover: #1d4ed8;
+					--tag-bg: #e5e7eb;
+					--tag-context-bg: #dbeafe;
+					--tag-context-text: #1d4ed8;
+					--reserved-bg: #fef3c7;
+					--reserved-text: #92400e;
+					--stars-color: #fbbf24;
+					--chip-bg: #ffffff;
+					--chip-hover: #f3f4f6;
+					--shadow: rgba(0,0,0,0.1);
+					--footer-border: #e5e7eb;
+				}
+				[data-theme="dark"] {
+					--bg-primary: #1a1a2e;
+					--bg-card: #16213e;
+					--text-primary: #e4e4e7;
+					--text-secondary: #a1a1aa;
+					--text-muted: #d4d4d8;
+					--border-color: #3f3f46;
+					--border-hover: #52525b;
+					--accent-color: #3b82f6;
+					--accent-hover: #2563eb;
+					--tag-bg: #27272a;
+					--tag-context-bg: #1e3a5f;
+					--tag-context-text: #60a5fa;
+					--reserved-bg: #422006;
+					--reserved-text: #fbbf24;
+					--stars-color: #fbbf24;
+					--chip-bg: #27272a;
+					--chip-hover: #3f3f46;
+					--shadow: rgba(0,0,0,0.3);
+					--footer-border: #3f3f46;
+				}
 				* { box-sizing: border-box; margin: 0; padding: 0; }
-				body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; padding: 2rem; }
+				body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg-primary); padding: 2rem; color: var(--text-primary); transition: background 0.3s, color 0.3s; }
 				.container { max-width: 1200px; margin: 0 auto; }
-				h1 { text-align: center; margin-bottom: 2rem; color: #333; }
+				h1 { text-align: center; margin-bottom: 2rem; color: var(--text-primary); }
 				.wishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
-				.wish-card { background: white; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+				.wish-card { background: var(--bg-card); border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px var(--shadow); transition: background 0.3s; }
 				.wish-card.reserved { opacity: 0.7; }
 				.wish-card img { width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem; }
-				.wish-card h2 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-				.wish-card .price { font-size: 1.5rem; font-weight: bold; color: #2563eb; margin-bottom: 0.5rem; }
-				.wish-card .stars { color: #fbbf24; margin-bottom: 0.5rem; }
+				.wish-card h2 { font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text-primary); }
+				.wish-card h2 a { color: var(--accent-color); text-decoration: none; }
+				.wish-card h2 a:hover { text-decoration: underline; }
+				.wish-card .price { font-size: 1.5rem; font-weight: bold; color: var(--accent-color); margin-bottom: 0.5rem; }
+				.wish-card .stars { color: var(--stars-color); margin-bottom: 0.5rem; }
 				.wish-card .tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
-				.wish-card .tag { background: #e5e7eb; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; }
-				.wish-card .context-tag { background: #dbeafe; color: #1d4ed8; }
-				.wish-card .description { color: #6b7280; font-size: 0.875rem; margin-bottom: 1rem; }
-				.wish-card .purchase-links { margin-bottom: 1rem; font-size: 0.875rem; }
-				.wish-card .purchase-links a { color: #2563eb; margin-left: 0.25rem; }
+				.wish-card .tag { background: var(--tag-bg); color: var(--text-secondary); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; }
+				.wish-card .context-tag { background: var(--tag-context-bg); color: var(--tag-context-text); }
+				.wish-card .description { color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem; }
+				.wish-card .purchase-links { margin-bottom: 1rem; font-size: 0.875rem; color: var(--text-secondary); }
+				.wish-card .purchase-links a { color: var(--accent-color); margin-left: 0.25rem; }
 				.wish-card .reserve-form { display: flex; gap: 0.5rem; }
-				.wish-card select, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid #d1d5db; }
-				.wish-card button { background: #2563eb; color: white; border: none; cursor: pointer; }
-				.wish-card button:hover { background: #1d4ed8; }
-				.wish-card .reserved-badge { background: #fef3c7; color: #92400e; padding: 0.5rem 1rem; border-radius: 6px; text-align: center; }
+				.wish-card select, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); }
+				.wish-card button { background: var(--accent-color); color: white; border: none; cursor: pointer; }
+				.wish-card button:hover { background: var(--accent-hover); }
+				.wish-card .reserved-badge { background: var(--reserved-bg); color: var(--reserved-text); padding: 0.5rem 1rem; border-radius: 6px; text-align: center; }
 				.wish-card .reserved-until { font-size: 0.75rem; margin-top: 0.25rem; opacity: 0.8; }
-				.empty { text-align: center; color: #6b7280; padding: 4rem; }
+				.empty { text-align: center; color: var(--text-secondary); padding: 4rem; }
 				.filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; align-items: center; }
-				.filter-label { font-weight: 500; color: #374151; margin-right: 0.5rem; }
-				.filter-chip { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.875rem; cursor: pointer; border: 1px solid #d1d5db; background: white; color: #374151; transition: all 0.15s; text-decoration: none; }
-				.filter-chip:hover { background: #f3f4f6; border-color: #9ca3af; }
-				.filter-chip.active { background: #2563eb; color: white; border-color: #2563eb; }
-				.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e5e7eb; text-align: center; }
-				.lang-selector { display: flex; justify-content: center; gap: 1rem; }
-				.lang-selector a { font-size: 1.5rem; text-decoration: none; opacity: 0.6; transition: opacity 0.15s; }
-				.lang-selector a:hover { opacity: 1; }
-				.lang-selector a.active { opacity: 1; }
+				.filter-label { font-weight: 500; color: var(--text-muted); margin-right: 0.5rem; }
+				.filter-chip { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--border-color); background: var(--chip-bg); color: var(--text-muted); transition: all 0.15s; text-decoration: none; }
+				.filter-chip:hover { background: var(--chip-hover); border-color: var(--border-hover); }
+				.filter-chip.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
+				.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--footer-border); text-align: center; }
+				.footer-row { display: flex; justify-content: center; gap: 1rem; margin-bottom: 0.75rem; }
+				.footer-row:last-child { margin-bottom: 0; }
+				.lang-selector a, .theme-selector button { font-size: 1.5rem; text-decoration: none; opacity: 0.6; transition: opacity 0.15s; background: none; border: none; cursor: pointer; padding: 0.25rem; }
+				.lang-selector a:hover, .theme-selector button:hover { opacity: 1; }
+				.lang-selector a.active, .theme-selector button.active { opacity: 1; }
 			</style>
 		</head>
 		<body>
@@ -86,13 +139,33 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 					@WishContent(wishes, allTags, activeTag, lang)
 				</div>
 				<footer class="footer">
-					<div class="lang-selector">
+					<div class="footer-row lang-selector">
 						<a href="/?lang=en" class={ templ.KV("active", lang == "en") } title="English">🇬🇧</a>
 						<a href="/?lang=ru" class={ templ.KV("active", lang == "ru") } title="Русский">🇷🇺</a>
 						<a href="/?lang=zh" class={ templ.KV("active", lang == "zh") } title="中文">🇨🇳</a>
 					</div>
+					<div class="footer-row theme-selector">
+						<button onclick="setTheme('light')" id="theme-light" title="Light">☀️</button>
+						<button onclick="setTheme('auto')" id="theme-auto" title="Auto">🌓</button>
+						<button onclick="setTheme('dark')" id="theme-dark" title="Dark">🌙</button>
+					</div>
 				</footer>
 			</div>
+			<script>
+				function setTheme(theme) {
+					localStorage.setItem('theme', theme);
+					updateTheme();
+				}
+				function updateTheme() {
+					const theme = localStorage.getItem('theme') || 'auto';
+					const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+					document.querySelectorAll('.theme-selector button').forEach(btn => btn.classList.remove('active'));
+					document.getElementById('theme-' + theme)?.classList.add('active');
+				}
+				updateTheme();
+				window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme);
+			</script>
 		</body>
 	</html>
 }
