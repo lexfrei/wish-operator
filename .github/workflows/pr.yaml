@@ -116,7 +116,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: 'v3.18.0'
+          version: 'v3.18.6'
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -284,7 +284,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
         with:
-          version: 'v3.18.0'
+          version: 'v3.18.6'
 
       - name: Modify Chart.yaml and values.yaml
         run: |
