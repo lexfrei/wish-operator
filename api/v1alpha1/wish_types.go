@@ -23,9 +23,13 @@ type WishSpec struct {
 	// +optional
 	ImageURL string `json:"imageURL,omitempty"`
 
-	// ProductURL is the link to purchase the item.
+	// OfficialURL is the link to the official product page.
 	// +optional
-	ProductURL string `json:"productURL,omitempty"`
+	OfficialURL string `json:"officialURL,omitempty"`
+
+	// PurchaseURLs is a list of links where the item can be purchased.
+	// +optional
+	PurchaseURLs []string `json:"purchaseURLs,omitempty"`
 
 	// MSRP is the price display string (e.g., "₽ 19900").
 	// +optional

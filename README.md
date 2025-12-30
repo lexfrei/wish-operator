@@ -46,7 +46,10 @@ spec:
   title: "Mechanical Keyboard"
   description: "Cherry MX Brown switches"
   msrp: "$150"
-  productURL: "https://example.com/keyboard"
+  officialURL: "https://example.com/keyboard"
+  purchaseURLs:
+    - "https://amazon.com/keyboard"
+    - "https://newegg.com/keyboard"
   imageURL: "https://example.com/keyboard.jpg"
   priority: 4
   tags:
@@ -64,7 +67,8 @@ spec:
 | `title` | string | Name of the desired item (required) |
 | `description` | string | Why you want this item |
 | `msrp` | string | Price display (e.g., "$150", "€99") |
-| `productURL` | string | Link to purchase |
+| `officialURL` | string | Official product page |
+| `purchaseURLs` | []string | Links where to buy |
 | `imageURL` | string | Product image URL |
 | `priority` | int32 | Importance 1-5 (displayed as stars) |
 | `tags` | []string | Category labels |

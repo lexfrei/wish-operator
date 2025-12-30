@@ -34,8 +34,8 @@ templ WishCard(wish *wishlistv1alpha1.Wish) {
 			<img src={ wish.Spec.ImageURL } alt={ wish.Spec.Title }/>
 		}
 		<h2>
-			if wish.Spec.ProductURL != "" {
-				<a href={ templ.SafeURL(wish.Spec.ProductURL) } target="_blank">{ wish.Spec.Title }</a>
+			if wish.Spec.OfficialURL != "" {
+				<a href={ templ.SafeURL(wish.Spec.OfficialURL) } target="_blank">{ wish.Spec.Title }</a>
 			} else {
 				{ wish.Spec.Title }
 			}
@@ -56,6 +56,14 @@ templ WishCard(wish *wishlistv1alpha1.Wish) {
 		</div>
 		if wish.Spec.Description != "" {
 			<div class="description">{ wish.Spec.Description }</div>
+		}
+		if len(wish.Spec.PurchaseURLs) > 0 {
+			<div class="purchase-links">
+				<span>Buy:</span>
+				for i, url := range wish.Spec.PurchaseURLs {
+					<a href={ templ.SafeURL(url) } target="_blank">{ fmt.Sprintf("[%d]", i+1) }</a>
+				}
+			</div>
 		}
 		if wish.Status.Reserved {
 			<div class="reserved-badge">Reserved</div>

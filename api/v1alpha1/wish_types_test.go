@@ -16,20 +16,22 @@ func TestWishSpec_Fields(t *testing.T) {
 	t.Parallel()
 
 	spec := WishSpec{
-		Title:       "Test Gift",
-		ImageURL:    "https://example.com/image.jpg",
-		ProductURL:  "https://example.com/product",
-		MSRP:        "₽ 19900",
-		Tags:        []string{"electronics", "gadgets"},
-		ContextTags: []string{"birthday", "christmas"},
-		Description: "I really want this because...",
-		Priority:    5,
-		TTL:         &metav1.Duration{Duration: 30 * 24 * time.Hour},
+		Title:        "Test Gift",
+		ImageURL:     "https://example.com/image.jpg",
+		OfficialURL:  "https://example.com/product",
+		PurchaseURLs: []string{"https://shop1.com/buy", "https://shop2.com/buy"},
+		MSRP:         "₽ 19900",
+		Tags:         []string{"electronics", "gadgets"},
+		ContextTags:  []string{"birthday", "christmas"},
+		Description:  "I really want this because...",
+		Priority:     5,
+		TTL:          &metav1.Duration{Duration: 30 * 24 * time.Hour},
 	}
 
 	assert.Equal(t, "Test Gift", spec.Title)
 	assert.Equal(t, "https://example.com/image.jpg", spec.ImageURL)
-	assert.Equal(t, "https://example.com/product", spec.ProductURL)
+	assert.Equal(t, "https://example.com/product", spec.OfficialURL)
+	assert.Equal(t, []string{"https://shop1.com/buy", "https://shop2.com/buy"}, spec.PurchaseURLs)
 	assert.Equal(t, "₽ 19900", spec.MSRP)
 	assert.Equal(t, []string{"electronics", "gadgets"}, spec.Tags)
 	assert.Equal(t, []string{"birthday", "christmas"}, spec.ContextTags)
@@ -75,7 +77,8 @@ func TestWish_DefaultValues(t *testing.T) {
 
 	// Optional fields should be empty/zero by default
 	assert.Empty(t, wish.Spec.ImageURL)
-	assert.Empty(t, wish.Spec.ProductURL)
+	assert.Empty(t, wish.Spec.OfficialURL)
+	assert.Empty(t, wish.Spec.PurchaseURLs)
 	assert.Empty(t, wish.Spec.MSRP)
 	assert.Empty(t, wish.Spec.Tags)
 	assert.Empty(t, wish.Spec.ContextTags)
