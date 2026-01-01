@@ -193,9 +193,13 @@ func (s *Server) listWishes(ctx context.Context, filterTag string) ([]wishlistv1
 		active = append(active, *wish)
 	}
 
-	// Sort by priority descending (highest stars first)
+	// Sort by priority descending (highest stars first), then by title alphabetically
 	sort.Slice(active, func(i, j int) bool {
-		return active[i].Spec.Priority > active[j].Spec.Priority
+		if active[i].Spec.Priority != active[j].Spec.Priority {
+			return active[i].Spec.Priority > active[j].Spec.Priority
+		}
+
+		return active[i].Spec.Title < active[j].Spec.Title
 	})
 
 	// Convert tag set to sorted slice

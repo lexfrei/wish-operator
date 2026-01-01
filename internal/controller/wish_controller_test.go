@@ -200,7 +200,9 @@ var _ = Describe("Wish Controller", func() {
 				if err != nil {
 					return false
 				}
-				return !wish.Status.Reserved
+				return !wish.Status.Reserved &&
+					wish.Status.ReservedAt == nil &&
+					wish.Status.ReservationExpires == nil
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
