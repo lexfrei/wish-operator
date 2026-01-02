@@ -29,6 +29,8 @@ type WishReconciler struct {
 
 // Reconcile handles the reconciliation of Wish resources.
 // It manages TTL expiration and reservation cleanup.
+//
+//nolint:gocognit // Standard reconcile pattern with migration and cleanup logic
 func (r *WishReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -63,21 +65,53 @@ func (r *WishReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	// Check and clear expired reservations
-	if wish.IsReservationExpired() {
+	// Migration: convert legacy Reserved format to new Reservations slice
+	//nolint:staticcheck // Intentional use of deprecated fields for migration
+	if wish.Status.Reserved && len(wish.Status.Reservations) == 0 {
+		//nolint:staticcheck // Intentional use of deprecated fields for migration
+		if wish.Status.ReservedAt != nil && wish.Status.ReservationExpires != nil {
+			wish.Status.Reservations = []wishlistv1alpha1.Reservation{{
+				Quantity: 1,
+				//nolint:staticcheck // Intentional use of deprecated fields for migration
+				CreatedAt: *wish.Status.ReservedAt,
+				//nolint:staticcheck // Intentional use of deprecated fields for migration
+				ExpiresAt: *wish.Status.ReservationExpires,
+			}}
+			log.Info("Migrated legacy reservation to new format")
+		}
+
+		//nolint:staticcheck // Intentional use of deprecated fields for migration
 		wish.Status.Reserved = false
+		//nolint:staticcheck // Intentional use of deprecated fields for migration
 		wish.Status.ReservedAt = nil
+		//nolint:staticcheck // Intentional use of deprecated fields for migration
 		wish.Status.ReservationExpires = nil
 		statusChanged = true
-		log.Info("Cleared expired reservation")
 	}
 
-	// Schedule requeue for reservation expiration
-	if wish.Status.Reserved && wish.Status.ReservationExpires != nil {
-		reservationRemaining := time.Until(wish.Status.ReservationExpires.Time)
-		if reservationRemaining > 0 {
-			if requeueAfter == 0 || reservationRemaining < requeueAfter {
-				requeueAfter = reservationRemaining
+	// Clean up expired reservations from the slice
+	now := time.Now()
+	activeReservations := make([]wishlistv1alpha1.Reservation, 0, len(wish.Status.Reservations))
+
+	for _, res := range wish.Status.Reservations {
+		if res.ExpiresAt.After(now) {
+			activeReservations = append(activeReservations, res)
+		} else {
+			statusChanged = true
+			log.Info("Removed expired reservation", "quantity", res.Quantity, "expiredAt", res.ExpiresAt)
+		}
+	}
+
+	if len(activeReservations) != len(wish.Status.Reservations) {
+		wish.Status.Reservations = activeReservations
+	}
+
+	// Schedule requeue for next reservation expiry
+	if next := wish.NextReservationExpiry(); next != nil {
+		remaining := time.Until(next.Time)
+		if remaining > 0 {
+			if requeueAfter == 0 || remaining < requeueAfter {
+				requeueAfter = remaining
 			}
 		}
 	}

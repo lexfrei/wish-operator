@@ -12,6 +12,19 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// Reservation represents a single reservation of one or more items.
+type Reservation struct {
+	// Quantity is the number of items reserved in this reservation.
+	// +kubebuilder:validation:Minimum=1
+	Quantity int32 `json:"quantity"`
+
+	// CreatedAt is when this reservation was made.
+	CreatedAt metav1.Time `json:"createdAt"`
+
+	// ExpiresAt is when this reservation will expire.
+	ExpiresAt metav1.Time `json:"expiresAt"`
+}
+
 // WishSpec defines the desired state of Wish.
 type WishSpec struct {
 	// Title is the name of the desired item.
@@ -56,21 +69,20 @@ type WishSpec struct {
 	// TTL defines how long the wish stays active.
 	// +optional
 	TTL *metav1.Duration `json:"ttl,omitempty"`
+
+	// Quantity is the total number of items available for this wish.
+	// Defaults to 1 if not specified (backwards compatible).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	// +optional
+	Quantity int32 `json:"quantity,omitempty"`
 }
 
 // WishStatus defines the observed state of Wish.
 type WishStatus struct {
-	// Reserved indicates if someone has reserved this wish.
+	// Reservations is a list of active reservations for this wish.
 	// +optional
-	Reserved bool `json:"reserved,omitempty"`
-
-	// ReservedAt is the timestamp when the wish was reserved.
-	// +optional
-	ReservedAt *metav1.Time `json:"reservedAt,omitempty"`
-
-	// ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
-	// +optional
-	ReservationExpires *metav1.Time `json:"reservationExpires,omitempty"`
+	Reservations []Reservation `json:"reservations,omitempty"`
 
 	// Active indicates if the wish is within its TTL.
 	// +optional
@@ -81,6 +93,26 @@ type WishStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// --- DEPRECATED FIELDS (kept for backwards compatibility during migration) ---
+
+	// Reserved indicates if someone has reserved this wish.
+	//
+	// Deprecated: Use Reservations slice instead.
+	// +optional
+	Reserved bool `json:"reserved,omitempty"`
+
+	// ReservedAt is the timestamp when the wish was reserved.
+	//
+	// Deprecated: Use Reservations slice instead.
+	// +optional
+	ReservedAt *metav1.Time `json:"reservedAt,omitempty"`
+
+	// ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
+	//
+	// Deprecated: Use Reservations slice instead.
+	// +optional
+	ReservationExpires *metav1.Time `json:"reservationExpires,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -113,7 +145,9 @@ type WishList struct {
 	Items []Wish `json:"items"`
 }
 
-// IsReservationExpired checks if the reservation has expired.
+// IsReservationExpired checks if the legacy reservation has expired.
+//
+// Deprecated: Use new Reservations slice instead.
 func (w *Wish) IsReservationExpired() bool {
 	if !w.Status.Reserved {
 		return false
@@ -124,6 +158,74 @@ func (w *Wish) IsReservationExpired() bool {
 	}
 
 	return time.Now().After(w.Status.ReservationExpires.Time)
+}
+
+// GetQuantity returns the total quantity, defaulting to 1 if not set.
+func (w *Wish) GetQuantity() int32 {
+	if w.Spec.Quantity <= 0 {
+		return 1
+	}
+
+	return w.Spec.Quantity
+}
+
+// TotalReserved returns the sum of all reservation quantities.
+func (w *Wish) TotalReserved() int32 {
+	var total int32
+	for _, r := range w.Status.Reservations {
+		total += r.Quantity
+	}
+
+	return total
+}
+
+// AvailableQuantity returns how many items are available for reservation.
+func (w *Wish) AvailableQuantity() int32 {
+	available := w.GetQuantity() - w.TotalReserved()
+	if available < 0 {
+		return 0
+	}
+
+	return available
+}
+
+// ActiveReservations returns reservations that have not yet expired.
+func (w *Wish) ActiveReservations() []Reservation {
+	now := time.Now()
+
+	var active []Reservation
+
+	for _, r := range w.Status.Reservations {
+		if r.ExpiresAt.After(now) {
+			active = append(active, r)
+		}
+	}
+
+	return active
+}
+
+// IsFullyReserved returns true if all items are reserved.
+func (w *Wish) IsFullyReserved() bool {
+	return w.AvailableQuantity() == 0
+}
+
+// NextReservationExpiry returns the earliest expiration time among all reservations.
+// Returns nil if there are no reservations.
+func (w *Wish) NextReservationExpiry() *metav1.Time {
+	if len(w.Status.Reservations) == 0 {
+		return nil
+	}
+
+	var earliest *metav1.Time
+
+	for i := range w.Status.Reservations {
+		r := &w.Status.Reservations[i]
+		if earliest == nil || r.ExpiresAt.Time.Before(earliest.Time) {
+			earliest = &r.ExpiresAt
+		}
+	}
+
+	return earliest
 }
 
 // IsExpired checks if the wish has exceeded its TTL.

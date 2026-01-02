@@ -141,7 +141,7 @@ var _ = Describe("Wish Controller", func() {
 		})
 	})
 
-	Context("When reconciling a Wish with expired reservation", func() {
+	Context("When reconciling a Wish with legacy expired reservation", func() {
 		const wishName = "test-wish-reservation-expired"
 		const wishNamespace = "default"
 
@@ -152,7 +152,7 @@ var _ = Describe("Wish Controller", func() {
 		}
 
 		BeforeEach(func() {
-			By("Creating a Wish with expired reservation")
+			By("Creating a Wish with legacy expired reservation")
 			pastTime := metav1.NewTime(time.Now().Add(-time.Hour))
 			wish := &wishlistv1alpha1.Wish{
 				ObjectMeta: metav1.ObjectMeta{
@@ -165,10 +165,10 @@ var _ = Describe("Wish Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, wish)).To(Succeed())
 
-			// Update status with expired reservation
-			wish.Status.Reserved = true
-			wish.Status.ReservedAt = &pastTime
-			wish.Status.ReservationExpires = &pastTime
+			// Update status with legacy expired reservation format
+			wish.Status.Reserved = true                //nolint:staticcheck // Testing legacy field migration
+			wish.Status.ReservedAt = &pastTime         //nolint:staticcheck // Testing legacy field migration
+			wish.Status.ReservationExpires = &pastTime //nolint:staticcheck // Testing legacy field migration
 			Expect(k8sClient.Status().Update(ctx, wish)).To(Succeed())
 		})
 
@@ -181,8 +181,8 @@ var _ = Describe("Wish Controller", func() {
 			}
 		})
 
-		It("should clear expired reservation", func() {
-			By("Reconciling the resource with expired reservation")
+		It("should migrate and clear expired legacy reservation", func() {
+			By("Reconciling the resource with legacy expired reservation")
 			reconciler := &WishReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
@@ -193,16 +193,163 @@ var _ = Describe("Wish Controller", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Checking that reservation is cleared")
+			By("Checking that legacy fields are cleared and reservations slice is empty")
 			wish := &wishlistv1alpha1.Wish{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, typeNamespacedName, wish)
 				if err != nil {
 					return false
 				}
+				//nolint:staticcheck // Verifying legacy fields are cleared after migration
 				return !wish.Status.Reserved &&
 					wish.Status.ReservedAt == nil &&
-					wish.Status.ReservationExpires == nil
+					wish.Status.ReservationExpires == nil &&
+					len(wish.Status.Reservations) == 0
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When reconciling a Wish with expired reservations in new format", func() {
+		const wishName = "test-wish-new-reservation-expired"
+		const wishNamespace = "default"
+
+		ctx := context.Background()
+		typeNamespacedName := types.NamespacedName{
+			Name:      wishName,
+			Namespace: wishNamespace,
+		}
+
+		BeforeEach(func() {
+			By("Creating a Wish with expired reservations in new format")
+			pastTime := metav1.NewTime(time.Now().Add(-time.Hour))
+			wish := &wishlistv1alpha1.Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wishName,
+					Namespace: wishNamespace,
+				},
+				Spec: wishlistv1alpha1.WishSpec{
+					Title:    "Multi Reserved Gift",
+					Quantity: 5,
+				},
+			}
+			Expect(k8sClient.Create(ctx, wish)).To(Succeed())
+
+			// Update status with expired reservation in new format
+			wish.Status.Reservations = []wishlistv1alpha1.Reservation{
+				{
+					Quantity:  2,
+					CreatedAt: pastTime,
+					ExpiresAt: pastTime,
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, wish)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("Cleaning up the Wish resource")
+			wish := &wishlistv1alpha1.Wish{}
+			err := k8sClient.Get(ctx, typeNamespacedName, wish)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, wish)).To(Succeed())
+			}
+		})
+
+		It("should remove expired reservations from slice", func() {
+			By("Reconciling the resource with expired reservations")
+			reconciler := &WishReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking that reservations slice is empty")
+			wish := &wishlistv1alpha1.Wish{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, wish)
+				if err != nil {
+					return false
+				}
+				return len(wish.Status.Reservations) == 0
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When reconciling a Wish with mixed active and expired reservations", func() {
+		const wishName = "test-wish-mixed-reservations"
+		const wishNamespace = "default"
+
+		ctx := context.Background()
+		typeNamespacedName := types.NamespacedName{
+			Name:      wishName,
+			Namespace: wishNamespace,
+		}
+
+		BeforeEach(func() {
+			By("Creating a Wish with mixed reservations")
+			pastTime := metav1.NewTime(time.Now().Add(-time.Hour))
+			futureTime := metav1.NewTime(time.Now().Add(time.Hour))
+			wish := &wishlistv1alpha1.Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      wishName,
+					Namespace: wishNamespace,
+				},
+				Spec: wishlistv1alpha1.WishSpec{
+					Title:    "Multi Reserved Gift",
+					Quantity: 10,
+				},
+			}
+			Expect(k8sClient.Create(ctx, wish)).To(Succeed())
+
+			// Update status with mixed reservations
+			wish.Status.Reservations = []wishlistv1alpha1.Reservation{
+				{
+					Quantity:  2,
+					CreatedAt: pastTime,
+					ExpiresAt: pastTime, // expired
+				},
+				{
+					Quantity:  3,
+					CreatedAt: pastTime,
+					ExpiresAt: futureTime, // active
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, wish)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			By("Cleaning up the Wish resource")
+			wish := &wishlistv1alpha1.Wish{}
+			err := k8sClient.Get(ctx, typeNamespacedName, wish)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, wish)).To(Succeed())
+			}
+		})
+
+		It("should keep only active reservations", func() {
+			By("Reconciling the resource with mixed reservations")
+			reconciler := &WishReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Checking that only active reservation remains")
+			wish := &wishlistv1alpha1.Wish{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, wish)
+				if err != nil {
+					return false
+				}
+				return len(wish.Status.Reservations) == 1 &&
+					wish.Status.Reservations[0].Quantity == 3
 			}, timeout, interval).Should(BeTrue())
 		})
 	})

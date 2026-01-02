@@ -68,6 +68,14 @@ spec:
                 items:
                   type: string
                 type: array
+              quantity:
+                default: 1
+                description: |-
+                  Quantity is the total number of items available for this wish.
+                  Defaults to 1 if not specified (backwards compatible).
+                format: int32
+                minimum: 1
+                type: integer
               tags:
                 description: Tags are category labels for the wish.
                 items:
@@ -150,15 +158,47 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               reservationExpires:
-                description: ReservationExpires is when the reservation will expire
-                  (1-8 weeks from reservedAt).
+                description: |-
+                  ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
+                  Deprecated: Use Reservations slice instead.
                 format: date-time
                 type: string
+              reservations:
+                description: Reservations is a list of active reservations for this
+                  wish.
+                items:
+                  description: Reservation represents a single reservation of one
+                    or more items.
+                  properties:
+                    createdAt:
+                      description: CreatedAt is when this reservation was made.
+                      format: date-time
+                      type: string
+                    expiresAt:
+                      description: ExpiresAt is when this reservation will expire.
+                      format: date-time
+                      type: string
+                    quantity:
+                      description: Quantity is the number of items reserved in this
+                        reservation.
+                      format: int32
+                      minimum: 1
+                      type: integer
+                  required:
+                  - createdAt
+                  - expiresAt
+                  - quantity
+                  type: object
+                type: array
               reserved:
-                description: Reserved indicates if someone has reserved this wish.
+                description: |-
+                  Reserved indicates if someone has reserved this wish.
+                  Deprecated: Use Reservations slice instead.
                 type: boolean
               reservedAt:
-                description: ReservedAt is the timestamp when the wish was reserved.
+                description: |-
+                  ReservedAt is the timestamp when the wish was reserved.
+                  Deprecated: Use Reservations slice instead.
                 format: date-time
                 type: string
             type: object

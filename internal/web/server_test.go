@@ -112,11 +112,11 @@ func TestServer_HandleReserve(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: wishlistv1alpha1.WishSpec{
-			Title: "Reservable Gift",
+			Title:    "Reservable Gift",
+			Quantity: 3,
 		},
 		Status: wishlistv1alpha1.WishStatus{
-			Active:   true,
-			Reserved: false,
+			Active: true,
 		},
 	}
 
@@ -125,6 +125,7 @@ func TestServer_HandleReserve(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("weeks", "4")
+	form.Set("quantity", "2")
 
 	req := httptest.NewRequest(http.MethodPost, "/wishes/reserve-wish/reserve", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -134,22 +135,21 @@ func TestServer_HandleReserve(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	// Verify wish is now reserved
+	// Verify wish now has a reservation
 	updatedWish := &wishlistv1alpha1.Wish{}
 	err := srv.client.Get(context.Background(),
 		client.ObjectKey{Name: "reserve-wish", Namespace: "default"},
 		updatedWish)
 	require.NoError(t, err)
-	assert.True(t, updatedWish.Status.Reserved)
-	assert.NotNil(t, updatedWish.Status.ReservedAt)
-	assert.NotNil(t, updatedWish.Status.ReservationExpires)
+	require.Len(t, updatedWish.Status.Reservations, 1)
+	assert.Equal(t, int32(2), updatedWish.Status.Reservations[0].Quantity)
 
 	// Verify reservation is 4 weeks
-	expectedExpiry := updatedWish.Status.ReservedAt.Add(4 * 7 * 24 * time.Hour)
-	assert.WithinDuration(t, expectedExpiry, updatedWish.Status.ReservationExpires.Time, time.Second)
+	expectedExpiry := updatedWish.Status.Reservations[0].CreatedAt.Add(4 * 7 * 24 * time.Hour)
+	assert.WithinDuration(t, expectedExpiry, updatedWish.Status.Reservations[0].ExpiresAt.Time, time.Second)
 }
 
-func TestServer_HandleReserve_AlreadyReserved(t *testing.T) {
+func TestServer_HandleReserve_FullyReserved(t *testing.T) {
 	t.Parallel()
 
 	now := metav1.Now()
@@ -161,13 +161,18 @@ func TestServer_HandleReserve_AlreadyReserved(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: wishlistv1alpha1.WishSpec{
-			Title: "Already Reserved Gift",
+			Title:    "Fully Reserved Gift",
+			Quantity: 2,
 		},
 		Status: wishlistv1alpha1.WishStatus{
-			Active:             true,
-			Reserved:           true,
-			ReservedAt:         &now,
-			ReservationExpires: &expires,
+			Active: true,
+			Reservations: []wishlistv1alpha1.Reservation{
+				{
+					Quantity:  2,
+					CreatedAt: now,
+					ExpiresAt: expires,
+				},
+			},
 		},
 	}
 
@@ -184,6 +189,49 @@ func TestServer_HandleReserve_AlreadyReserved(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestServer_HandleReserve_QuantityExceedsAvailable(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	expires := metav1.NewTime(now.Add(7 * 24 * time.Hour))
+
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "partial-wish",
+			Namespace: "default",
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Partially Reserved Gift",
+			Quantity: 5,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+			Reservations: []wishlistv1alpha1.Reservation{
+				{
+					Quantity:  3,
+					CreatedAt: now,
+					ExpiresAt: expires,
+				},
+			},
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	form := url.Values{}
+	form.Set("weeks", "2")
+	form.Set("quantity", "3") // Only 2 available
+
+	req := httptest.NewRequest(http.MethodPost, "/wishes/partial-wish/reserve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestServer_HandleReserve_InvalidWeeks(t *testing.T) {

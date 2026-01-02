@@ -96,6 +96,7 @@ func (s *Server) renderWishPage(w http.ResponseWriter, r *http.Request, fullPage
 	}
 }
 
+//nolint:funlen // Main reserve handler with validation logic
 func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.DetectLanguage(r)
 	name := r.PathValue("name")
@@ -119,6 +120,19 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse quantity (default to 1)
+	quantity := int32(1)
+	if qStr := r.FormValue("quantity"); qStr != "" {
+		q, err := strconv.ParseInt(qStr, 10, 32)
+		if err != nil || q < 1 {
+			http.Error(w, i18n.T(lang, "err_invalid_quantity"), http.StatusBadRequest)
+
+			return
+		}
+
+		quantity = int32(q)
+	}
+
 	wish := &wishlistv1alpha1.Wish{}
 	if err := s.client.Get(r.Context(), client.ObjectKey{Name: name, Namespace: s.namespace}, wish); err != nil {
 		if client.IgnoreNotFound(err) == nil {
@@ -132,18 +146,29 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if wish.Status.Reserved {
-		http.Error(w, i18n.T(lang, "err_already_reserved"), http.StatusConflict)
+	// Check availability using new Reservations model
+	available := wish.AvailableQuantity()
+	if available == 0 {
+		http.Error(w, i18n.T(lang, "err_fully_reserved"), http.StatusConflict)
 
 		return
 	}
 
+	if quantity > available {
+		http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_exceeds"), available), http.StatusBadRequest)
+
+		return
+	}
+
+	// Create new reservation in new format
 	now := metav1.Now()
 	expires := metav1.NewTime(now.Add(time.Duration(weeks) * 7 * 24 * time.Hour))
 
-	wish.Status.Reserved = true
-	wish.Status.ReservedAt = &now
-	wish.Status.ReservationExpires = &expires
+	wish.Status.Reservations = append(wish.Status.Reservations, wishlistv1alpha1.Reservation{
+		Quantity:  quantity,
+		CreatedAt: now,
+		ExpiresAt: expires,
+	})
 
 	if err := s.client.Status().Update(r.Context(), wish); err != nil {
 		http.Error(w, i18n.T(lang, "err_reserve_failed"), http.StatusInternalServerError)

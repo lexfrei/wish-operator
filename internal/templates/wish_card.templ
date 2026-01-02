@@ -30,7 +30,7 @@ func repeatRune(r rune, count int) string {
 }
 
 templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
-	<div id={ fmt.Sprintf("wish-%s", wish.Name) } class={ "wish-card", templ.KV("reserved", wish.Status.Reserved) }>
+	<div id={ fmt.Sprintf("wish-%s", wish.Name) } class={ "wish-card", templ.KV("fully-reserved", wish.IsFullyReserved()) }>
 		if wish.Spec.ImageURL != "" {
 			<img src={ wish.Spec.ImageURL } alt={ wish.Spec.Title }/>
 		}
@@ -66,20 +66,38 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 				}
 			</div>
 		}
-		if wish.Status.Reserved {
-			<div class="reserved-badge">
-				{ i18n.T(lang, "reserved_badge") }
-				if wish.Status.ReservationExpires != nil {
-					<div class="reserved-until">{ fmt.Sprintf(i18n.T(lang, "reserved_until"), i18n.FormatDate(lang, wish.Status.ReservationExpires.Time)) }</div>
+		// Show quantity info if quantity > 1
+		if wish.GetQuantity() > 1 {
+			<div class="quantity-info">
+				{ fmt.Sprintf("%s %d/%d", i18n.T(lang, "available_label"), wish.AvailableQuantity(), wish.GetQuantity()) }
+			</div>
+		}
+		// Show reservation list
+		if len(wish.ActiveReservations()) > 0 {
+			<div class="reservations-list">
+				for _, res := range wish.ActiveReservations() {
+					<div class="reservation-item">
+						{ fmt.Sprintf(i18n.T(lang, "reserved_count"), res.Quantity, i18n.FormatDate(lang, res.ExpiresAt.Time)) }
+					</div>
 				}
 			</div>
-		} else {
+		}
+		// Reserve form - only show if items available
+		if wish.AvailableQuantity() > 0 {
 			<form
 				class="reserve-form"
 				hx-post={ fmt.Sprintf("/wishes/%s/reserve?lang=%s", wish.Name, lang) }
 				hx-target={ fmt.Sprintf("#wish-%s", wish.Name) }
 				hx-swap="outerHTML"
 			>
+				// Quantity selector (only if more than 1 available)
+				if wish.AvailableQuantity() > 1 {
+					<select name="quantity" required>
+						for i := int32(1); i <= wish.AvailableQuantity(); i++ {
+							<option value={ fmt.Sprintf("%d", i) }>{ fmt.Sprintf("%d", i) }</option>
+						}
+					</select>
+				}
 				<select name="weeks" required>
 					<option value="1">{ fmt.Sprintf("1 %s", i18n.T(lang, "week_one")) }</option>
 					<option value="2">{ fmt.Sprintf("2 %s", i18n.Weeks(lang, 2)) }</option>
@@ -92,6 +110,10 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 				</select>
 				<button type="submit">{ i18n.T(lang, "reserve_btn") }</button>
 			</form>
+		} else {
+			<div class="fully-reserved-badge">
+				{ i18n.T(lang, "err_fully_reserved") }
+			</div>
 		}
 	</div>
 }
