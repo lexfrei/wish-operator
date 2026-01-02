@@ -2,8 +2,8 @@ apiVersion: v2
 name: wish-operator
 description: Kubernetes operator for managing wishlists
 type: application
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.3.1
+appVersion: "0.3.1"
 maintainers:
   - name: lexfrei
     email: f@lex.la
