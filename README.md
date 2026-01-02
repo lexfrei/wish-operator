@@ -5,8 +5,9 @@ Kubernetes operator for managing wishlists. Create wishes as Kubernetes resource
 ## Features
 
 - **Wish CRD** — define wishes with title, description, price, images, priority (1-5 stars), and tags
+- **Quantity support** — specify multiple items per wish, reserve partially
 - **Web UI** — HTMX-powered interface for viewing and reserving wishes
-- **Reservations** — reserve wishes for 1-8 weeks with automatic expiration
+- **Reservations** — multiple anonymous reservations per wish, 1-8 weeks with automatic expiration
 - **TTL** — wishes can auto-expire after a defined duration
 - **Rate limiting** — per-IP rate limiting to prevent abuse
 - **Gateway API** — HTTPRoute support for ingress via Gateway API
@@ -57,7 +58,8 @@ spec:
     - office
   contextTags:
     - birthday
-  ttl: 720h  # 30 days
+  ttl: 720h    # 30 days
+  quantity: 1  # default, can be omitted
 ```
 
 ### Wish Spec Fields
@@ -74,15 +76,14 @@ spec:
 | `tags` | []string | Category labels |
 | `contextTags` | []string | Occasions (birthday, christmas) |
 | `ttl` | duration | Auto-expire after this duration |
+| `quantity` | int32 | Number of items available (default: 1) |
 
 ### Wish Status
 
 | Field | Description |
 |-------|-------------|
 | `active` | Whether wish is within TTL |
-| `reserved` | Whether someone reserved it |
-| `reservedAt` | When it was reserved |
-| `reservationExpires` | When reservation expires |
+| `reservations` | List of active reservations (quantity, createdAt, expiresAt) |
 
 ## Configuration
 
@@ -104,7 +105,7 @@ spec:
 
 ### Prerequisites
 
-- Go 1.23+
+- Go 1.25+
 - kubectl
 - Helm 3
 - [helm-unittest](https://github.com/helm-unittest/helm-unittest)
