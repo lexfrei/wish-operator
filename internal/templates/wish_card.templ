@@ -66,8 +66,12 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 				}
 			</div>
 		}
-		// Show quantity info if quantity > 1
-		if wish.GetQuantity() > 1 {
+		// Show quantity info for unlimited or if quantity > 1
+		if wish.IsUnlimited() {
+			<div class="quantity-info unlimited">
+				{ i18n.T(lang, "unlimited_available") }
+			</div>
+		} else if wish.GetQuantity() > 1 {
 			<div class="quantity-info">
 				{ fmt.Sprintf("%s %d/%d", i18n.T(lang, "available_label"), wish.AvailableQuantity(), wish.GetQuantity()) }
 			</div>
@@ -82,16 +86,20 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 				}
 			</div>
 		}
-		// Reserve form - only show if items available
-		if wish.AvailableQuantity() > 0 {
+		// Reserve form - show if unlimited or items available
+		if wish.IsUnlimited() || wish.AvailableQuantity() > 0 {
 			<form
 				class="reserve-form"
 				hx-post={ fmt.Sprintf("/wishes/%s/reserve?lang=%s", wish.Name, lang) }
 				hx-target={ fmt.Sprintf("#wish-%s", wish.Name) }
 				hx-swap="outerHTML"
 			>
-				// Quantity selector (only if more than 1 available)
-				if wish.AvailableQuantity() > 1 {
+				// Quantity selector
+				if wish.IsUnlimited() {
+					// For unlimited, show number input
+					<input type="number" name="quantity" value="1" min="1" required/>
+				} else if wish.AvailableQuantity() > 1 {
+					// For limited, show dropdown
 					<select name="quantity" required>
 						for i := int32(1); i <= wish.AvailableQuantity(); i++ {
 							<option value={ fmt.Sprintf("%d", i) }>{ fmt.Sprintf("%d", i) }</option>

@@ -91,7 +91,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/lexfrei/wish-operator:0.3.1
+          value: ghcr.io/lexfrei/wish-operator:0.4.0
 
   - it: should allow custom image tag
     set:

@@ -334,3 +334,101 @@ func TestServer_RateLimiting(t *testing.T) {
 	handler.ServeHTTP(rec3, req3)
 	assert.Equal(t, http.StatusTooManyRequests, rec3.Code)
 }
+
+func TestServer_HandleReserve_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unlimited-test",
+			Namespace: "default",
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Unlimited Item",
+			Quantity: 0, // Unlimited
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	// Reserve large quantity
+	form := url.Values{}
+	form.Set("weeks", "4")
+	form.Set("quantity", "100")
+
+	req := httptest.NewRequest(http.MethodPost, "/wishes/unlimited-test/reserve?lang=en", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Verify reservation was created
+	updated := &wishlistv1alpha1.Wish{}
+	err := srv.client.Get(context.Background(), client.ObjectKey{Name: "unlimited-test", Namespace: "default"}, updated)
+	require.NoError(t, err)
+
+	assert.Len(t, updated.Status.Reservations, 1)
+	assert.Equal(t, int32(100), updated.Status.Reservations[0].Quantity)
+}
+
+func TestServer_HandleReserve_UnlimitedMultiple(t *testing.T) {
+	t.Parallel()
+
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unlimited-test-multi",
+			Namespace: "default",
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Unlimited Item",
+			Quantity: 0, // Unlimited
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	// First reservation: 50 items
+	form1 := url.Values{}
+	form1.Set("weeks", "4")
+	form1.Set("quantity", "50")
+
+	req1 := httptest.NewRequest(http.MethodPost, "/wishes/unlimited-test-multi/reserve?lang=en", strings.NewReader(form1.Encode()))
+	req1.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec1 := httptest.NewRecorder()
+	handler.ServeHTTP(rec1, req1)
+
+	assert.Equal(t, http.StatusOK, rec1.Code)
+
+	// Second reservation: 75 items
+	form2 := url.Values{}
+	form2.Set("weeks", "2")
+	form2.Set("quantity", "75")
+
+	req2 := httptest.NewRequest(http.MethodPost, "/wishes/unlimited-test-multi/reserve?lang=en", strings.NewReader(form2.Encode()))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+
+	assert.Equal(t, http.StatusOK, rec2.Code)
+
+	// Verify both reservations exist
+	final := &wishlistv1alpha1.Wish{}
+	err := srv.client.Get(context.Background(), client.ObjectKey{Name: "unlimited-test-multi", Namespace: "default"}, final)
+	require.NoError(t, err)
+
+	assert.Len(t, final.Status.Reservations, 2)
+	assert.Equal(t, int32(50), final.Status.Reservations[0].Quantity)
+	assert.Equal(t, int32(75), final.Status.Reservations[1].Quantity)
+}

@@ -72,7 +72,8 @@ type WishSpec struct {
 
 	// Quantity is the total number of items available for this wish.
 	// Defaults to 1 if not specified (backwards compatible).
-	// +kubebuilder:validation:Minimum=1
+	// Set to 0 for unlimited quantity (users can reserve as many as they want).
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	// +optional
 	Quantity int32 `json:"quantity,omitempty"`
@@ -160,9 +161,16 @@ func (w *Wish) IsReservationExpired() bool {
 	return time.Now().After(w.Status.ReservationExpires.Time)
 }
 
-// GetQuantity returns the total quantity, defaulting to 1 if not set.
+// IsUnlimited returns true if the wish has unlimited quantity (quantity == 0).
+func (w *Wish) IsUnlimited() bool {
+	return w.Spec.Quantity == 0
+}
+
+// GetQuantity returns the total quantity.
+// In real K8s with kubebuilder, default=1 ensures unset becomes 1.
+// Explicit 0 means unlimited. Negative values fallback to 1 (shouldn't happen due to validation).
 func (w *Wish) GetQuantity() int32 {
-	if w.Spec.Quantity <= 0 {
+	if w.Spec.Quantity < 0 {
 		return 1
 	}
 
@@ -180,7 +188,13 @@ func (w *Wish) TotalReserved() int32 {
 }
 
 // AvailableQuantity returns how many items are available for reservation.
+// For unlimited wishes (quantity == 0), returns math.MaxInt32.
 func (w *Wish) AvailableQuantity() int32 {
+	if w.IsUnlimited() {
+		//nolint:mnd // MaxInt32 value for unlimited quantity
+		return 2147483647 // math.MaxInt32
+	}
+
 	available := w.GetQuantity() - w.TotalReserved()
 	if available < 0 {
 		return 0
@@ -205,7 +219,12 @@ func (w *Wish) ActiveReservations() []Reservation {
 }
 
 // IsFullyReserved returns true if all items are reserved.
+// Unlimited wishes (quantity == 0) are never fully reserved.
 func (w *Wish) IsFullyReserved() bool {
+	if w.IsUnlimited() {
+		return false
+	}
+
 	return w.AvailableQuantity() == 0
 }
 

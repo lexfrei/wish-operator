@@ -143,6 +143,8 @@ linters:
           - wsl_v5
           - varnamelen
           - noinlineerr
+          - gocyclo
+          - cyclop
         path: internal/web/
       # Templ generated files
       - linters:

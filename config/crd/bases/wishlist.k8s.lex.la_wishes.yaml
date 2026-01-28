@@ -73,8 +73,9 @@ spec:
                 description: |-
                   Quantity is the total number of items available for this wish.
                   Defaults to 1 if not specified (backwards compatible).
+                  Set to 0 for unlimited quantity (users can reserve as many as they want).
                 format: int32
-                minimum: 1
+                minimum: 0
                 type: integer
               tags:
                 description: Tags are category labels for the wish.
@@ -160,6 +161,7 @@ spec:
               reservationExpires:
                 description: |-
                   ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
+
                   Deprecated: Use Reservations slice instead.
                 format: date-time
                 type: string
@@ -193,11 +195,13 @@ spec:
               reserved:
                 description: |-
                   Reserved indicates if someone has reserved this wish.
+
                   Deprecated: Use Reservations slice instead.
                 type: boolean
               reservedAt:
                 description: |-
                   ReservedAt is the timestamp when the wish was reserved.
+
                   Deprecated: Use Reservations slice instead.
                 format: date-time
                 type: string

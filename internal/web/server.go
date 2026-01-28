@@ -147,17 +147,20 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check availability using new Reservations model
-	available := wish.AvailableQuantity()
-	if available == 0 {
-		http.Error(w, i18n.T(lang, "err_fully_reserved"), http.StatusConflict)
+	// Skip validation for unlimited wishes (quantity == 0)
+	if !wish.IsUnlimited() {
+		available := wish.AvailableQuantity()
+		if available == 0 {
+			http.Error(w, i18n.T(lang, "err_fully_reserved"), http.StatusConflict)
 
-		return
-	}
+			return
+		}
 
-	if quantity > available {
-		http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_exceeds"), available), http.StatusBadRequest)
+		if quantity > available {
+			http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_exceeds"), available), http.StatusBadRequest)
 
-		return
+			return
+		}
 	}
 
 	// Create new reservation in new format

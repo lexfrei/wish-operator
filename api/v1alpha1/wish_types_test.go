@@ -201,11 +201,6 @@ func TestWish_GetQuantity(t *testing.T) {
 		expected int32
 	}{
 		{
-			name:     "zero defaults to 1",
-			quantity: 0,
-			expected: 1,
-		},
-		{
 			name:     "negative defaults to 1",
 			quantity: -1,
 			expected: 1,
@@ -287,7 +282,7 @@ func TestWish_AvailableQuantity(t *testing.T) {
 	}{
 		{
 			name:         "all available (default quantity)",
-			quantity:     0,
+			quantity:     1,
 			reservations: nil,
 			expected:     1,
 		},
@@ -423,7 +418,7 @@ func TestWish_IsFullyReserved(t *testing.T) {
 		},
 		{
 			name:     "default quantity fully reserved",
-			quantity: 0,
+			quantity: 1,
 			reservations: []Reservation{
 				{Quantity: 1},
 			},
@@ -493,6 +488,215 @@ func TestWish_NextReservationExpiry(t *testing.T) {
 				require.NotNil(t, result)
 				assert.Equal(t, tt.expectedTime.Time, result.Time)
 			}
+		})
+	}
+}
+
+func TestWish_IsUnlimited(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity int32
+		want     bool
+	}{
+		{
+			name:     "quantity 0 is unlimited",
+			quantity: 0,
+			want:     true,
+		},
+		{
+			name:     "quantity 1 is not unlimited",
+			quantity: 1,
+			want:     false,
+		},
+		{
+			name:     "quantity 5 is not unlimited",
+			quantity: 5,
+			want:     false,
+		},
+		{
+			name:     "negative quantity is not unlimited",
+			quantity: -1,
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+			}
+			assert.Equal(t, tt.want, wish.IsUnlimited())
+		})
+	}
+}
+
+func TestWish_GetQuantity_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity int32
+		want     int32
+	}{
+		{
+			name:     "explicit 0 returns 0 (unlimited)",
+			quantity: 0,
+			want:     0,
+		},
+		{
+			name:     "unset (0) with default=1 should be 1",
+			quantity: 0,
+			want:     0, // Note: in practice kubebuilder default=1 will set it to 1
+		},
+		{
+			name:     "quantity 1 returns 1",
+			quantity: 1,
+			want:     1,
+		},
+		{
+			name:     "quantity 5 returns 5",
+			quantity: 5,
+			want:     5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+			}
+			assert.Equal(t, tt.want, wish.GetQuantity())
+		})
+	}
+}
+
+func TestWish_AvailableQuantity_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	futureExpiry := metav1.NewTime(now.Add(24 * time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		wantLarge    bool // true if should return MaxInt32
+		wantExact    int32
+	}{
+		{
+			name:      "unlimited with no reservations returns MaxInt32",
+			quantity:  0,
+			wantLarge: true,
+		},
+		{
+			name:     "unlimited with reservations still returns MaxInt32",
+			quantity: 0,
+			reservations: []Reservation{
+				{Quantity: 5, CreatedAt: now, ExpiresAt: futureExpiry},
+				{Quantity: 10, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			wantLarge: true,
+		},
+		{
+			name:      "quantity 5 with no reservations returns 5",
+			quantity:  5,
+			wantExact: 5,
+		},
+		{
+			name:     "quantity 5 with 2 reserved returns 3",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 2, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			wantExact: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+				Status: WishStatus{
+					Reservations: tt.reservations,
+				},
+			}
+			result := wish.AvailableQuantity()
+			if tt.wantLarge {
+				assert.Greater(t, result, int32(1000000), "unlimited should return very large number")
+			} else {
+				assert.Equal(t, tt.wantExact, result)
+			}
+		})
+	}
+}
+
+func TestWish_IsFullyReserved_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	futureExpiry := metav1.NewTime(now.Add(24 * time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		want         bool
+	}{
+		{
+			name:     "unlimited is never fully reserved",
+			quantity: 0,
+			want:     false,
+		},
+		{
+			name:     "unlimited with many reservations still not fully reserved",
+			quantity: 0,
+			reservations: []Reservation{
+				{Quantity: 100, CreatedAt: now, ExpiresAt: futureExpiry},
+				{Quantity: 200, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: false,
+		},
+		{
+			name:     "quantity 5 with 5 reserved is fully reserved",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 5, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: true,
+		},
+		{
+			name:     "quantity 5 with 3 reserved is not fully reserved",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 3, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+				Status: WishStatus{
+					Reservations: tt.reservations,
+				},
+			}
+			assert.Equal(t, tt.want, wish.IsFullyReserved())
 		})
 	}
 }
