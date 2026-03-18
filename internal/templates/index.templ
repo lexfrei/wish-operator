@@ -100,7 +100,7 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 				.wishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
 				.wish-card { background: var(--bg-card); border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px var(--shadow); transition: background 0.3s; }
 				.wish-card.reserved { opacity: 0.7; }
-				.wish-card img { width: 100%; height: 200px; object-fit: cover; border-radius: 8px; margin-bottom: 1rem; }
+				.wish-card img { width: 100%; height: 200px; object-fit: contain; border-radius: 8px; margin-bottom: 1rem; }
 				.wish-card h2 { font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text-primary); }
 				.wish-card h2 a { color: var(--accent-color); text-decoration: none; }
 				.wish-card h2 a:hover { text-decoration: underline; }
