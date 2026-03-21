@@ -226,7 +226,7 @@ func (w *webRunnable) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*1000000000)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*1000000000)
 		defer cancel()
 
 		_ = server.Shutdown(shutdownCtx)

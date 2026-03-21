@@ -94,7 +94,7 @@ jobs:
       - name: Run tests
         run: |
           export KUBEBUILDER_ASSETS="$(setup-envtest use -p path)"
-          go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic ./...
+          go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v /test/e2e)
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5
