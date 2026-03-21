@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	minWeeks = 1
-	maxWeeks = 8
+	minWeeks       = 1
+	maxWeeks       = 8
+	maxRequestBody = 1 << 20 // 1 MB
 )
 
 // Server handles HTTP requests for the wishlist web interface.
@@ -106,6 +107,8 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, i18n.T(lang, "err_invalid_form"), http.StatusBadRequest)
