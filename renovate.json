@@ -21,6 +21,13 @@
       "description": "Automerge all GitHub Actions updates including major",
       "matchManagers": ["github-actions"],
       "automerge": true
+    },
+    {
+      "description": "Allow Renovate to bump go directive in go.mod",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump"
     }
   ]
 }
