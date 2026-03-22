@@ -1,6 +1,6 @@
 module github.com/lexfrei/wish-operator
 
-go 1.25.5
+go 1.26.1
 
 require (
 	github.com/a-h/templ v0.3.1001
