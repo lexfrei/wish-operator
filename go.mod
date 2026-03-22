@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/a-h/templ v0.3.1001
-	github.com/onsi/ginkgo/v2 v2.28.0
+	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.14.0
