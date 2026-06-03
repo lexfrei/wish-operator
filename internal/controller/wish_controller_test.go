@@ -16,6 +16,8 @@ import (
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
 )
 
+const testMultiReservedGift = "Multi Reserved Gift"
+
 var _ = Describe("Wish Controller", func() {
 	const (
 		timeout  = time.Second * 10
@@ -228,7 +230,7 @@ var _ = Describe("Wish Controller", func() {
 					Namespace: wishNamespace,
 				},
 				Spec: wishlistv1alpha1.WishSpec{
-					Title:    "Multi Reserved Gift",
+					Title:    testMultiReservedGift,
 					Quantity: 5,
 				},
 			}
@@ -298,7 +300,7 @@ var _ = Describe("Wish Controller", func() {
 					Namespace: wishNamespace,
 				},
 				Spec: wishlistv1alpha1.WishSpec{
-					Title:    "Multi Reserved Gift",
+					Title:    testMultiReservedGift,
 					Quantity: 10,
 				},
 			}

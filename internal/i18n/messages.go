@@ -3,112 +3,153 @@
 
 package i18n
 
+// Translation keys. Shared across every language map below so they are
+// declared once here to stay typo-safe and avoid duplicated string literals.
+const (
+	keyPageTitle          = "page_title"
+	keyFilterLabel        = "filter_label"
+	keyFilterAll          = "filter_all"
+	keyEmptyFiltered      = "empty_filtered"
+	keyEmptyDefault       = "empty_default"
+	keyBuyLabel           = "buy_label"
+	keyReservedBadge      = "reserved_badge"
+	keyReservedUntil      = "reserved_until"
+	keyReserveBtn         = "reserve_btn"
+	keyWeeksFormat        = "weeks_format"
+	keyWeekOne            = "week_one"
+	keyWeeksFew           = "weeks_few"
+	keyWeeksMany          = "weeks_many"
+	keyQuantityLabel      = "quantity_label"
+	keyAvailableLabel     = "available_label"
+	keyUnlimitedLabel     = "unlimited_label"
+	keyUnlimitedAvailable = "unlimited_available"
+	keyReservedCount      = "reserved_count"
+
+	keyErrListWishes      = "err_list_wishes"
+	keyErrRender          = "err_render"
+	keyErrMissingName     = "err_missing_name"
+	keyErrInvalidForm     = "err_invalid_form"
+	keyErrWeeksRange      = "err_weeks_range"
+	keyErrNotFound        = "err_not_found"
+	keyErrGetWish         = "err_get_wish"
+	keyErrAlreadyReserved = "err_already_reserved"
+	keyErrReserveFailed   = "err_reserve_failed"
+	keyErrRateLimit       = "err_rate_limit"
+	keyErrInvalidQuantity = "err_invalid_quantity"
+	keyErrFullyReserved   = "err_fully_reserved"
+	keyErrQuantityExceeds = "err_quantity_exceeds"
+)
+
+// ruWeeksMany is the Russian plural form for "weeks", shared by the
+// weeks_many and weeks_format keys.
+const ruWeeksMany = "недель"
+
 // messages contains all translations keyed by language code.
 //
 //nolint:gochecknoglobals,gosmopolitan // immutable translation map with CJK characters
 var messages = map[string]map[string]string{
 	LangEN: {
 		// UI strings
-		"page_title":          "Wishlist",
-		"filter_label":        "Filter:",
-		"filter_all":          "All",
-		"empty_filtered":      "No wishes with tag",
-		"empty_default":       "No wishes yet.",
-		"buy_label":           "Buy:",
-		"reserved_badge":      "Reserved",
-		"reserved_until":      "until %s",
-		"reserve_btn":         "Reserve",
-		"weeks_format":        "weeks",
-		"week_one":            "week",
-		"quantity_label":      "Qty:",
-		"available_label":     "Available:",
-		"unlimited_label":     "Unlimited",
-		"unlimited_available": "Available: ∞",
-		"reserved_count":      "%d reserved until %s",
+		keyPageTitle:          "Wishlist",
+		keyFilterLabel:        "Filter:",
+		keyFilterAll:          "All",
+		keyEmptyFiltered:      "No wishes with tag",
+		keyEmptyDefault:       "No wishes yet.",
+		keyBuyLabel:           "Buy:",
+		keyReservedBadge:      "Reserved",
+		keyReservedUntil:      "until %s",
+		keyReserveBtn:         "Reserve",
+		keyWeeksFormat:        "weeks",
+		keyWeekOne:            "week",
+		keyQuantityLabel:      "Qty:",
+		keyAvailableLabel:     "Available:",
+		keyUnlimitedLabel:     "Unlimited",
+		keyUnlimitedAvailable: "Available: ∞",
+		keyReservedCount:      "%d reserved until %s",
 
 		// Error messages
-		"err_list_wishes":      "Failed to list wishes",
-		"err_render":           "Failed to render template",
-		"err_missing_name":     "Missing wish name",
-		"err_invalid_form":     "Invalid form data",
-		"err_weeks_range":      "Weeks must be between %d and %d",
-		"err_not_found":        "Wish not found",
-		"err_get_wish":         "Failed to get wish",
-		"err_already_reserved": "Wish is already reserved",
-		"err_reserve_failed":   "Failed to reserve wish",
-		"err_rate_limit":       "Too many requests",
-		"err_invalid_quantity": "Invalid quantity",
-		"err_fully_reserved":   "All items are reserved",
-		"err_quantity_exceeds": "Only %d available",
+		keyErrListWishes:      "Failed to list wishes",
+		keyErrRender:          "Failed to render template",
+		keyErrMissingName:     "Missing wish name",
+		keyErrInvalidForm:     "Invalid form data",
+		keyErrWeeksRange:      "Weeks must be between %d and %d",
+		keyErrNotFound:        "Wish not found",
+		keyErrGetWish:         "Failed to get wish",
+		keyErrAlreadyReserved: "Wish is already reserved",
+		keyErrReserveFailed:   "Failed to reserve wish",
+		keyErrRateLimit:       "Too many requests",
+		keyErrInvalidQuantity: "Invalid quantity",
+		keyErrFullyReserved:   "All items are reserved",
+		keyErrQuantityExceeds: "Only %d available",
 	},
 	LangRU: {
 		// UI strings
-		"page_title":          "Список желаний",
-		"filter_label":        "Фильтр:",
-		"filter_all":          "Все",
-		"empty_filtered":      "Нет желаний с тегом",
-		"empty_default":       "Пока нет желаний.",
-		"buy_label":           "Купить:",
-		"reserved_badge":      "Зарезервировано",
-		"reserved_until":      "до %s",
-		"reserve_btn":         "Зарезервировать",
-		"week_one":            "неделя",
-		"weeks_few":           "недели",
-		"weeks_many":          "недель",
-		"weeks_format":        "недель",
-		"quantity_label":      "Кол-во:",
-		"available_label":     "Доступно:",
-		"unlimited_label":     "Неограничено",
-		"unlimited_available": "Доступно: ∞",
-		"reserved_count":      "%d зарезервировано до %s",
+		keyPageTitle:          "Список желаний",
+		keyFilterLabel:        "Фильтр:",
+		keyFilterAll:          "Все",
+		keyEmptyFiltered:      "Нет желаний с тегом",
+		keyEmptyDefault:       "Пока нет желаний.",
+		keyBuyLabel:           "Купить:",
+		keyReservedBadge:      "Зарезервировано",
+		keyReservedUntil:      "до %s",
+		keyReserveBtn:         "Зарезервировать",
+		keyWeekOne:            "неделя",
+		keyWeeksFew:           "недели",
+		keyWeeksMany:          ruWeeksMany,
+		keyWeeksFormat:        ruWeeksMany,
+		keyQuantityLabel:      "Кол-во:",
+		keyAvailableLabel:     "Доступно:",
+		keyUnlimitedLabel:     "Неограничено",
+		keyUnlimitedAvailable: "Доступно: ∞",
+		keyReservedCount:      "%d зарезервировано до %s",
 
 		// Error messages
-		"err_list_wishes":      "Не удалось загрузить список желаний",
-		"err_render":           "Ошибка отображения",
-		"err_missing_name":     "Не указано название",
-		"err_invalid_form":     "Неверные данные формы",
-		"err_weeks_range":      "Срок должен быть от %d до %d недель",
-		"err_not_found":        "Желание не найдено",
-		"err_get_wish":         "Не удалось получить желание",
-		"err_already_reserved": "Уже зарезервировано",
-		"err_reserve_failed":   "Не удалось зарезервировать",
-		"err_rate_limit":       "Слишком много запросов",
-		"err_invalid_quantity": "Неверное количество",
-		"err_fully_reserved":   "Всё зарезервировано",
-		"err_quantity_exceeds": "Доступно только %d",
+		keyErrListWishes:      "Не удалось загрузить список желаний",
+		keyErrRender:          "Ошибка отображения",
+		keyErrMissingName:     "Не указано название",
+		keyErrInvalidForm:     "Неверные данные формы",
+		keyErrWeeksRange:      "Срок должен быть от %d до %d недель",
+		keyErrNotFound:        "Желание не найдено",
+		keyErrGetWish:         "Не удалось получить желание",
+		keyErrAlreadyReserved: "Уже зарезервировано",
+		keyErrReserveFailed:   "Не удалось зарезервировать",
+		keyErrRateLimit:       "Слишком много запросов",
+		keyErrInvalidQuantity: "Неверное количество",
+		keyErrFullyReserved:   "Всё зарезервировано",
+		keyErrQuantityExceeds: "Доступно только %d",
 	},
 	LangZH: {
 		// UI strings
-		"page_title":          "愿望清单",
-		"filter_label":        "筛选：",
-		"filter_all":          "全部",
-		"empty_filtered":      "没有带有此标签的愿望",
-		"empty_default":       "暂无愿望",
-		"buy_label":           "购买：",
-		"reserved_badge":      "已预订",
-		"reserved_until":      "至 %s",
-		"reserve_btn":         "预订",
-		"weeks_format":        "周",
-		"week_one":            "周",
-		"quantity_label":      "数量：",
-		"available_label":     "可用：",
-		"unlimited_label":     "无限",
-		"unlimited_available": "可用：∞",
-		"reserved_count":      "%d 已预订至 %s",
+		keyPageTitle:          "愿望清单",
+		keyFilterLabel:        "筛选：",
+		keyFilterAll:          "全部",
+		keyEmptyFiltered:      "没有带有此标签的愿望",
+		keyEmptyDefault:       "暂无愿望",
+		keyBuyLabel:           "购买：",
+		keyReservedBadge:      "已预订",
+		keyReservedUntil:      "至 %s",
+		keyReserveBtn:         "预订",
+		keyWeeksFormat:        "周",
+		keyWeekOne:            "周",
+		keyQuantityLabel:      "数量：",
+		keyAvailableLabel:     "可用：",
+		keyUnlimitedLabel:     "无限",
+		keyUnlimitedAvailable: "可用：∞",
+		keyReservedCount:      "%d 已预订至 %s",
 
 		// Error messages
-		"err_list_wishes":      "无法加载愿望列表",
-		"err_render":           "渲染失败",
-		"err_missing_name":     "缺少名称",
-		"err_invalid_form":     "表单数据无效",
-		"err_weeks_range":      "周数必须在%d到%d之间",
-		"err_not_found":        "未找到愿望",
-		"err_get_wish":         "获取愿望失败",
-		"err_already_reserved": "已被预订",
-		"err_reserve_failed":   "预订失败",
-		"err_rate_limit":       "请求过多",
-		"err_invalid_quantity": "数量无效",
-		"err_fully_reserved":   "全部已预订",
-		"err_quantity_exceeds": "仅有 %d 件可用",
+		keyErrListWishes:      "无法加载愿望列表",
+		keyErrRender:          "渲染失败",
+		keyErrMissingName:     "缺少名称",
+		keyErrInvalidForm:     "表单数据无效",
+		keyErrWeeksRange:      "周数必须在%d到%d之间",
+		keyErrNotFound:        "未找到愿望",
+		keyErrGetWish:         "获取愿望失败",
+		keyErrAlreadyReserved: "已被预订",
+		keyErrReserveFailed:   "预订失败",
+		keyErrRateLimit:       "请求过多",
+		keyErrInvalidQuantity: "数量无效",
+		keyErrFullyReserved:   "全部已预订",
+		keyErrQuantityExceeds: "仅有 %d 件可用",
 	},
 }
