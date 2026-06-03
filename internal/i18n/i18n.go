@@ -104,7 +104,7 @@ func weeksEnglish(n int) string {
 		return "1 week"
 	}
 
-	return T(LangEN, "weeks_format")
+	return T(LangEN, keyWeeksFormat)
 }
 
 func weeksRussian(n int) string {
@@ -117,22 +117,22 @@ func weeksRussian(n int) string {
 	lastOne := n % 10
 
 	if lastTwo >= 11 && lastTwo <= 14 {
-		return T(LangRU, "weeks_many") // недель
+		return T(LangRU, keyWeeksMany) // недель
 	}
 
 	switch lastOne {
 	case 1:
-		return T(LangRU, "week_one") // неделя
+		return T(LangRU, keyWeekOne) // неделя
 	case 2, 3, 4: //nolint:mnd // Russian pluralization rules
-		return T(LangRU, "weeks_few") // недели
+		return T(LangRU, keyWeeksFew) // недели
 	default:
-		return T(LangRU, "weeks_many") // недель
+		return T(LangRU, keyWeeksMany) // недель
 	}
 }
 
 func weeksChinese(_ int) string {
 	// Chinese doesn't have plural forms
-	return T(LangZH, "weeks_format")
+	return T(LangZH, keyWeeksFormat)
 }
 
 // FormatDate formats a date according to the language.

@@ -9,12 +9,13 @@ RUN echo 'nobody:x:65534:65534:Nobody:/:' > /tmp/passwd && \
 
 WORKDIR /build
 
-# Install templ
-RUN go install github.com/a-h/templ/cmd/templ@latest
-
 # Copy go mod files first for caching
 COPY go.mod go.sum ./
 RUN go mod download
+
+# Install templ at the version pinned in go.mod so the generator always
+# matches the runtime (a newer generator emits symbols an older runtime lacks)
+RUN go install github.com/a-h/templ/cmd/templ@"$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
 
 # Copy source and generate templ
 COPY . .

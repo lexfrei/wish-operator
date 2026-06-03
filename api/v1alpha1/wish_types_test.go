@@ -12,6 +12,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Shared test fixtures to avoid duplicated string literals.
+const (
+	testShop1URL           = "https://shop1.com/buy"
+	testShop2URL           = "https://shop2.com/buy"
+	testTagElectronics     = "electronics"
+	testTagGadgets         = "gadgets"
+	testTagBirthday        = "birthday"
+	testTagChristmas       = "christmas"
+	testCaseNoReservations = "no reservations"
+	testCaseSingleRes      = "single reservation"
+	testCasePartiallyRes   = "partially reserved"
+)
+
 func TestWishSpec_Fields(t *testing.T) {
 	t.Parallel()
 
@@ -19,10 +32,10 @@ func TestWishSpec_Fields(t *testing.T) {
 		Title:        "Test Gift",
 		ImageURL:     "https://example.com/image.jpg",
 		OfficialURL:  "https://example.com/product",
-		PurchaseURLs: []string{"https://shop1.com/buy", "https://shop2.com/buy"},
+		PurchaseURLs: []string{testShop1URL, testShop2URL},
 		MSRP:         "₽ 19900",
-		Tags:         []string{"electronics", "gadgets"},
-		ContextTags:  []string{"birthday", "christmas"},
+		Tags:         []string{testTagElectronics, testTagGadgets},
+		ContextTags:  []string{testTagBirthday, testTagChristmas},
 		Description:  "I really want this because...",
 		Priority:     5,
 		TTL:          &metav1.Duration{Duration: 30 * 24 * time.Hour},
@@ -31,10 +44,10 @@ func TestWishSpec_Fields(t *testing.T) {
 	assert.Equal(t, "Test Gift", spec.Title)
 	assert.Equal(t, "https://example.com/image.jpg", spec.ImageURL)
 	assert.Equal(t, "https://example.com/product", spec.OfficialURL)
-	assert.Equal(t, []string{"https://shop1.com/buy", "https://shop2.com/buy"}, spec.PurchaseURLs)
+	assert.Equal(t, []string{testShop1URL, testShop2URL}, spec.PurchaseURLs)
 	assert.Equal(t, "₽ 19900", spec.MSRP)
-	assert.Equal(t, []string{"electronics", "gadgets"}, spec.Tags)
-	assert.Equal(t, []string{"birthday", "christmas"}, spec.ContextTags)
+	assert.Equal(t, []string{testTagElectronics, testTagGadgets}, spec.Tags)
+	assert.Equal(t, []string{testTagBirthday, testTagChristmas}, spec.ContextTags)
 	assert.Equal(t, "I really want this because...", spec.Description)
 	assert.Equal(t, int32(5), spec.Priority)
 	require.NotNil(t, spec.TTL)
@@ -235,7 +248,7 @@ func TestWish_TotalReserved(t *testing.T) {
 		expected     int32
 	}{
 		{
-			name:         "no reservations",
+			name:         testCaseNoReservations,
 			reservations: nil,
 			expected:     0,
 		},
@@ -245,7 +258,7 @@ func TestWish_TotalReserved(t *testing.T) {
 			expected:     0,
 		},
 		{
-			name: "single reservation",
+			name: testCaseSingleRes,
 			reservations: []Reservation{
 				{Quantity: 2},
 			},
@@ -293,7 +306,7 @@ func TestWish_AvailableQuantity(t *testing.T) {
 			expected:     5,
 		},
 		{
-			name:     "partially reserved",
+			name:     testCasePartiallyRes,
 			quantity: 5,
 			reservations: []Reservation{
 				{Quantity: 2},
@@ -343,7 +356,7 @@ func TestWish_ActiveReservations(t *testing.T) {
 		expectedLen  int
 	}{
 		{
-			name:         "no reservations",
+			name:         testCaseNoReservations,
 			reservations: nil,
 			expectedLen:  0,
 		},
@@ -400,7 +413,7 @@ func TestWish_IsFullyReserved(t *testing.T) {
 			expected:     false,
 		},
 		{
-			name:     "partially reserved",
+			name:     testCasePartiallyRes,
 			quantity: 3,
 			reservations: []Reservation{
 				{Quantity: 1},
@@ -453,12 +466,12 @@ func TestWish_NextReservationExpiry(t *testing.T) {
 		expectedTime *metav1.Time
 	}{
 		{
-			name:         "no reservations",
+			name:         testCaseNoReservations,
 			reservations: nil,
 			expectNil:    true,
 		},
 		{
-			name: "single reservation",
+			name: testCaseSingleRes,
 			reservations: []Reservation{
 				{Quantity: 1, ExpiresAt: in1Hour},
 			},

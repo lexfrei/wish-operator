@@ -22,6 +22,17 @@ import (
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
 )
 
+// Shared test fixtures to avoid duplicated string literals.
+const (
+	testNamespace          = "default"
+	testWishName           = "test-wish"
+	testTitleGift          = "Test Gift"
+	testReserveWishName    = "reserve-wish"
+	testUnlimitedName      = "unlimited-test"
+	testUnlimitedMultiName = "unlimited-test-multi"
+	testTitleUnlimited     = "Unlimited Item"
+)
+
 func newTestServer(t *testing.T, wishes ...*wishlistv1alpha1.Wish) *Server {
 	t.Helper()
 
@@ -40,7 +51,7 @@ func newTestServer(t *testing.T, wishes ...*wishlistv1alpha1.Wish) *Server {
 		WithStatusSubresource(objs...).
 		Build()
 
-	return NewServer(fakeClient, "default", 30, 10)
+	return NewServer(fakeClient, testNamespace, 30, 10)
 }
 
 func TestServer_HandleIndex(t *testing.T) {
@@ -48,11 +59,11 @@ func TestServer_HandleIndex(t *testing.T) {
 
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-wish",
-			Namespace: "default",
+			Name:      testWishName,
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
-			Title:    "Test Gift",
+			Title:    testTitleGift,
 			Priority: 3,
 		},
 		Status: wishlistv1alpha1.WishStatus{
@@ -70,7 +81,7 @@ func TestServer_HandleIndex(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
-	assert.Contains(t, rec.Body.String(), "Test Gift")
+	assert.Contains(t, rec.Body.String(), testTitleGift)
 }
 
 func TestServer_HandleWishes(t *testing.T) {
@@ -78,8 +89,8 @@ func TestServer_HandleWishes(t *testing.T) {
 
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-wish",
-			Namespace: "default",
+			Name:      testWishName,
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
 			Title:    "HTMX Gift",
@@ -108,8 +119,8 @@ func TestServer_HandleReserve(t *testing.T) {
 
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "reserve-wish",
-			Namespace: "default",
+			Name:      testReserveWishName,
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
 			Title:    "Reservable Gift",
@@ -138,7 +149,7 @@ func TestServer_HandleReserve(t *testing.T) {
 	// Verify wish now has a reservation
 	updatedWish := &wishlistv1alpha1.Wish{}
 	err := srv.client.Get(context.Background(),
-		client.ObjectKey{Name: "reserve-wish", Namespace: "default"},
+		client.ObjectKey{Name: testReserveWishName, Namespace: testNamespace},
 		updatedWish)
 	require.NoError(t, err)
 	require.Len(t, updatedWish.Status.Reservations, 1)
@@ -158,7 +169,7 @@ func TestServer_HandleReserve_FullyReserved(t *testing.T) {
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "reserved-wish",
-			Namespace: "default",
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
 			Title:    "Fully Reserved Gift",
@@ -200,7 +211,7 @@ func TestServer_HandleReserve_QuantityExceedsAvailable(t *testing.T) {
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "partial-wish",
-			Namespace: "default",
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
 			Title:    "Partially Reserved Gift",
@@ -255,10 +266,10 @@ func TestServer_HandleReserve_InvalidWeeks(t *testing.T) {
 			wish := &wishlistv1alpha1.Wish{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-weeks-wish",
-					Namespace: "default",
+					Namespace: testNamespace,
 				},
 				Spec: wishlistv1alpha1.WishSpec{
-					Title: "Test Gift",
+					Title: testTitleGift,
 				},
 				Status: wishlistv1alpha1.WishStatus{
 					Active: true,
@@ -340,11 +351,11 @@ func TestServer_HandleReserve_Unlimited(t *testing.T) {
 
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unlimited-test",
-			Namespace: "default",
+			Name:      testUnlimitedName,
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
-			Title:    "Unlimited Item",
+			Title:    testTitleUnlimited,
 			Quantity: 0, // Unlimited
 		},
 		Status: wishlistv1alpha1.WishStatus{
@@ -370,7 +381,7 @@ func TestServer_HandleReserve_Unlimited(t *testing.T) {
 
 	// Verify reservation was created
 	updated := &wishlistv1alpha1.Wish{}
-	err := srv.client.Get(context.Background(), client.ObjectKey{Name: "unlimited-test", Namespace: "default"}, updated)
+	err := srv.client.Get(context.Background(), client.ObjectKey{Name: testUnlimitedName, Namespace: testNamespace}, updated)
 	require.NoError(t, err)
 
 	assert.Len(t, updated.Status.Reservations, 1)
@@ -382,11 +393,11 @@ func TestServer_HandleReserve_UnlimitedMultiple(t *testing.T) {
 
 	wish := &wishlistv1alpha1.Wish{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "unlimited-test-multi",
-			Namespace: "default",
+			Name:      testUnlimitedMultiName,
+			Namespace: testNamespace,
 		},
 		Spec: wishlistv1alpha1.WishSpec{
-			Title:    "Unlimited Item",
+			Title:    testTitleUnlimited,
 			Quantity: 0, // Unlimited
 		},
 		Status: wishlistv1alpha1.WishStatus{
@@ -425,7 +436,7 @@ func TestServer_HandleReserve_UnlimitedMultiple(t *testing.T) {
 
 	// Verify both reservations exist
 	final := &wishlistv1alpha1.Wish{}
-	err := srv.client.Get(context.Background(), client.ObjectKey{Name: "unlimited-test-multi", Namespace: "default"}, final)
+	err := srv.client.Get(context.Background(), client.ObjectKey{Name: testUnlimitedMultiName, Namespace: testNamespace}, final)
 	require.NoError(t, err)
 
 	assert.Len(t, final.Status.Reservations, 2)
