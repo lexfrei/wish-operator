@@ -54,7 +54,7 @@ jobs:
           cache: true
 
       - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
+        run: go install github.com/a-h/templ/cmd/templ@"$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
 
       - name: Generate templ files
         run: templ generate
@@ -62,7 +62,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.12.2
           args: --timeout=5m
 
   test:
@@ -81,7 +82,7 @@ jobs:
           cache: true
 
       - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
+        run: go install github.com/a-h/templ/cmd/templ@"$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
 
       - name: Generate templ files
         run: templ generate
