@@ -28,6 +28,12 @@
       "matchDepNames": ["go"],
       "matchDepTypes": ["golang"],
       "rangeStrategy": "bump"
+    },
+    {
+      "description": "Keep controller-runtime in lockstep with the Kubernetes libraries (a split bump breaks compilation: controller-runtime vX needs a matching client-go)",
+      "groupName": "kubernetes",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["sigs.k8s.io/controller-runtime", "k8s.io/**"]
     }
   ],
   "customManagers": [
