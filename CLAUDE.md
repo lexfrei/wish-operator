@@ -8,7 +8,7 @@ Users describe desired gifts as Kubernetes CRD resources (`Wish`). The operator 
 
 ## Technical Stack
 
-- **Language**: Go 1.25
+- **Language**: Go 1.26
 - **CRD API**: `wishlist.k8s.lex.la/v1alpha1`
 - **Controller**: controller-runtime
 - **Web**: HTMX + a-h/templ

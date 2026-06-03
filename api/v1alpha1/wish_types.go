@@ -259,5 +259,5 @@ func (w *Wish) IsExpired() bool {
 }
 
 func init() {
-	SchemeBuilder.Register(&Wish{}, &WishList{})
+	objectTypes = append(objectTypes, &Wish{}, &WishList{})
 }
