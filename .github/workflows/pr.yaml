@@ -98,7 +98,7 @@ jobs:
           go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v /test/e2e)
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.out
           flags: unittests
