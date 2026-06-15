@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/a-h/templ v0.3.1020
 	github.com/onsi/ginkgo/v2 v2.31.0
-	github.com/onsi/gomega v1.41.0
+	github.com/onsi/gomega v1.42.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/time v0.15.0
 	k8s.io/apimachinery v0.36.2
