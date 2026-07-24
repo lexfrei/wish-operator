@@ -53,6 +53,12 @@ operator:
   namespace: default
   rateLimit: 30
   rateBurst: 10
+  # Number of proxies in front of the web server that append to X-Forwarded-For.
+  # Rate limiting reads the client address that many entries from the right of
+  # the header. Keep at 0 unless such a proxy is in front: with 0 the header is
+  # ignored and the connection address is used, because anything else is
+  # supplied by the caller and lets it pick its own rate limit bucket.
+  trustedProxyHops: 0
   leaderElection: false
 
 # Gateway API HTTPRoute

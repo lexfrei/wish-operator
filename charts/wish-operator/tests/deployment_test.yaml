@@ -244,6 +244,57 @@ tests:
           path: spec.template.spec.containers[0].args
           content: --rate-burst=20
 
+  - it: should not trust proxy headers by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --trusted-proxy-hops=0
+
+  - it: should allow declaring trusted proxy hops
+    set:
+      operator:
+        trustedProxyHops: 2
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --trusted-proxy-hops=2
+
+  - it: should render trusted proxy hops when the value is absent
+    set:
+      operator:
+        trustedProxyHops: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --trusted-proxy-hops=0
+
+  - it: should render the watched namespace when the value is absent
+    set:
+      operator:
+        namespace: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --web-namespace=default
+
+  - it: should render rate limit when the value is absent
+    set:
+      operator:
+        rateLimit: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --rate-limit=30
+
+  - it: should render rate burst when the value is absent
+    set:
+      operator:
+        rateBurst: null
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --rate-burst=10
+
   - it: should not enable leader election by default
     asserts:
       - notContains:

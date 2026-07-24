@@ -36,9 +36,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - --web-bind-address=:8080
-            - --web-namespace={{ .Values.operator.namespace }}
-            - --rate-limit={{ .Values.operator.rateLimit }}
-            - --rate-burst={{ .Values.operator.rateBurst }}
+            {{- /* every flag falls back to its default, so an upgrade that drops new chart defaults, such as --reuse-values, cannot render an empty value the binary refuses to start on */}}
+            - --web-namespace={{ .Values.operator.namespace | default "default" }}
+            - --rate-limit={{ .Values.operator.rateLimit | default 30 }}
+            - --rate-burst={{ .Values.operator.rateBurst | default 10 }}
+            - --trusted-proxy-hops={{ .Values.operator.trustedProxyHops | default 0 }}
             - --health-probe-bind-address=:8081
             {{- if .Values.operator.leaderElection }}
             - --leader-elect

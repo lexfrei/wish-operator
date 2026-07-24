@@ -4,12 +4,12 @@ Kubernetes operator for managing wishlists. Create wishes as Kubernetes resource
 
 ## Features
 
-- **Wish CRD** — define wishes with title, description, price, images, priority (1-5 stars), and tags
+- **Wish CRD** — define wishes with title, description, price, images, priority (0-5 stars), and tags
 - **Quantity support** — specify multiple items per wish, reserve partially
 - **Web UI** — HTMX-powered interface for viewing and reserving wishes
 - **Reservations** — multiple anonymous reservations per wish, 1-8 weeks with automatic expiration
 - **TTL** — wishes can auto-expire after a defined duration
-- **Rate limiting** — per-IP rate limiting to prevent abuse
+- **Rate limiting** — per-IP rate limiting to prevent abuse, see [Client addresses behind a proxy](#client-addresses-behind-a-proxy)
 - **Gateway API** — HTTPRoute support for ingress via Gateway API
 
 ## Installation
@@ -72,7 +72,7 @@ spec:
 | `officialURL` | string | Official product page |
 | `purchaseURLs` | []string | Links where to buy |
 | `imageURL` | string | Product image URL |
-| `priority` | int32 | Importance 1-5 (displayed as stars) |
+| `priority` | int32 | Importance 0-5 (displayed as stars; 0 renders none) |
 | `tags` | []string | Category labels |
 | `contextTags` | []string | Occasions (birthday, christmas) |
 | `ttl` | duration | Auto-expire after this duration |
@@ -97,15 +97,30 @@ spec:
 | `operator.namespace` | default | Namespace to watch for Wishes |
 | `operator.rateLimit` | 30 | Requests per second per IP |
 | `operator.rateBurst` | 10 | Burst size for rate limiting |
+| `operator.trustedProxyHops` | 0 | Proxies in front that append to `X-Forwarded-For` (0 ignores the header) |
 | `httpRoute.enabled` | false | Create HTTPRoute resource |
 | `httpRoute.hostnames` | [] | Hostnames for the route |
 | `httpRoute.parentRefs` | [] | Gateway references |
+
+> **Upgrading from an earlier release behind a proxy:** set `operator.trustedProxyHops` as part of the upgrade. Earlier versions read the leftmost `X-Forwarded-For` entry, which a caller could set to anything; the header is now ignored unless you say what sits in front. Leaving it at the default puts every visitor arriving through your gateway into one shared bucket, because they all reach the operator from the same address. See [Client addresses behind a proxy](#client-addresses-behind-a-proxy).
+
+### Client addresses behind a proxy
+
+Rate limiting buckets requests by client address, and how that address is read depends on what sits in front of the operator. With the default `operator.trustedProxyHops: 0` the connection address is used and `X-Forwarded-For` is ignored, because a directly reachable server has no way to tell a real header from one the caller made up.
+
+Set `operator.trustedProxyHops` to the number of proxies that append to `X-Forwarded-For` on the way in — one for a single gateway, two when a CDN or tunnel fronts that gateway. The operator then counts that many entries from the right of the header, which is where the outermost proxy wrote the address it saw. Counting from the left instead would read whatever the caller sent, so a caller could rotate values and never hit the limit.
+
+IPv6 clients are bucketed by `/64` rather than by address, because a single subscriber is normally handed a whole `/64` and would otherwise get a fresh allowance for every address in it. IPv4 clients are bucketed per address.
+
+A hop count above zero also assumes the operator is reachable *only* through that chain. A ClusterIP Service is reachable directly by any other pod in the cluster, and such a caller picks its own `X-Forwarded-For` outright, so restrict traffic to the gateway with a NetworkPolicy if in-cluster callers are a concern.
+
+Set it too low and every visitor collapses onto the address of a proxy in the chain, sharing one bucket. Set it higher than the real chain and a caller can supply the entry that gets used. `X-Real-IP` is never read: proxies that append to `X-Forwarded-For` pass it through untouched. A proxy configured to set only `X-Real-IP`, as an nginx with a lone `proxy_set_header X-Real-IP` does, leaves nothing to count, so configure it to append to `X-Forwarded-For` as well.
 
 ## Development
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.26+
 - kubectl
 - Helm 3
 - [helm-unittest](https://github.com/helm-unittest/helm-unittest)

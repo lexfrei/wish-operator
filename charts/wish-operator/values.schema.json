@@ -293,7 +293,7 @@
           "minimum": 1,
           "maximum": 1000,
           "default": 30,
-          "description": "Rate limit (requests per minute per IP)"
+          "description": "Rate limit (requests per second per IP)"
         },
         "rateBurst": {
           "type": "integer",
@@ -301,6 +301,13 @@
           "maximum": 100,
           "default": 10,
           "description": "Rate limit burst size"
+        },
+        "trustedProxyHops": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 0,
+          "description": "Number of proxies in front that append to X-Forwarded-For (0 ignores the header)"
         },
         "leaderElection": {
           "type": "boolean",
