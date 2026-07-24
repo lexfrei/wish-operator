@@ -12,14 +12,14 @@ Users describe desired gifts as Kubernetes CRD resources (`Wish`). The operator 
 - **CRD API**: `wishlist.k8s.lex.la/v1alpha1`
 - **Controller**: controller-runtime
 - **Web**: HTMX + a-h/templ
-- **CLI**: cobra + viper
+- **CLI**: stdlib `flag`
 - **Testing**: testify + envtest
 
 ## Project Structure
 
 ```
 api/v1alpha1/          # CRD types (Wish)
-cmd/operator/          # Entry point
+cmd/                   # Entry point (main.go)
 internal/controller/   # Reconciler logic
 internal/web/          # HTTP server + handlers
 internal/templates/    # Templ files
@@ -30,13 +30,13 @@ charts/wish-operator/  # Helm chart
 
 ```bash
 # Generate deepcopy and CRD manifests
-go generate ./...
+make manifests generate
 
 # Run tests
 go test ./...
 
 # Build
-go build -o bin/operator ./cmd/operator
+make build
 
 # Lint
 golangci-lint run
@@ -57,19 +57,21 @@ This project follows strict TDD:
 **Spec fields**:
 - `title` (string, required): Item name
 - `imageURL` (string): Product image
-- `productURL` (string): Link to buy
+- `officialURL` (string): Manufacturer or product page
+- `purchaseURLs` ([]string): Places to buy it
 - `msrp` (string): Price display
 - `tags` ([]string): Category tags
 - `contextTags` ([]string): "For:" section
 - `description` (string): Why user wants this
-- `priority` (int32, 1-5): Displayed as stars
-- `ttl` (metav1.Duration): How long wish stays active
+- `priority` (int32, 0-5): Displayed as stars; 0 means unset and renders none
+- `quantity` (int32, default 1): How many are wanted; 0 means unlimited
+- `ttl` (*metav1.Duration): How long wish stays active
 
 **Status fields**:
-- `reserved` (bool): Is reserved
-- `reservedAt` (*metav1.Time): When reserved
-- `reservationExpires` (*metav1.Time): When reservation expires
+- `reservations` ([]Reservation): Active reservations, each with `quantity`, `createdAt`, `expiresAt`
 - `active` (bool): Within TTL
+- `conditions` ([]metav1.Condition): Declared on the type; the controller does not populate it yet
+- Deprecated, kept for migration off the single-reservation model: `reserved` (bool), `reservedAt` (*metav1.Time), `reservationExpires` (*metav1.Time)
 
 ## Kubernetes Context
 

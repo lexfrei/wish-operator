@@ -8,8 +8,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
+	"math"
 	"net/http"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -19,6 +22,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -43,6 +47,82 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+const (
+	// webReadHeaderTimeout bounds how long a caller may take to send headers.
+	webReadHeaderTimeout = 10 * time.Second
+	// webShutdownTimeout bounds how long in-flight requests get to finish.
+	webShutdownTimeout = 5 * time.Second
+)
+
+// webOptions groups the settings of the public wishlist web server.
+type webOptions struct {
+	namespace        string
+	trustedProxyHops int
+	rateLimit        float64
+	rateBurst        int
+}
+
+// bindWebFlags registers the web server flags on flagSet.
+func bindWebFlags(flagSet *flag.FlagSet, opts *webOptions) {
+	flagSet.StringVar(&opts.namespace, "web-namespace", "default", "The namespace to watch for Wish resources.")
+	flagSet.IntVar(&opts.trustedProxyHops, "trusted-proxy-hops", 0,
+		"Number of proxies in front of the web server that append to X-Forwarded-For. "+
+			"Rate limiting reads the client address from that many entries counted from the right. "+
+			"Leave at 0 when the server is reachable directly, so proxy headers are ignored.")
+	flagSet.Float64Var(&opts.rateLimit, "rate-limit", 30, "Rate limit requests per second per IP.")
+	flagSet.IntVar(&opts.rateBurst, "rate-burst", 10, "Rate limit burst size.")
+}
+
+// Errors returned by validateWebFlags.
+var (
+	errEmptyNamespace    = errors.New("--web-namespace must not be empty")
+	errNegativeProxyHops = errors.New("--trusted-proxy-hops must not be negative")
+	errRateLimitInvalid  = errors.New("--rate-limit must be a finite number greater than zero")
+	errRateBurstTooLow   = errors.New("--rate-burst must be at least one")
+)
+
+// newWebServer maps parsed flags onto the web server. web.NewServer takes its
+// arguments positionally and two of them are ints, so a transposition compiles
+// and runs; this is the single place that mapping is written down, and the
+// place a test can pin it.
+func newWebServer(c client.Client, opts *webOptions) *web.Server {
+	return web.NewServer(c, opts.namespace, opts.trustedProxyHops, opts.rateLimit, opts.rateBurst)
+}
+
+// validateWebFlags rejects settings the flag package cannot express. Each one
+// is a value the binary would otherwise accept and then misbehave on: a
+// negative hop count reads like "trust one proxy" but disables proxy headers,
+// and a zero rate or burst refuses every single request with 429 rather than
+// limiting anything.
+//
+// Non-finite rates matter most, because they are the only ones that fail open.
+// NaN passes every ordered comparison, so it survives a bare "<= 0" check and
+// then makes the limiter allow everything; +Inf is rate.Inf, which is
+// unlimited by definition. Both turn rate limiting off with nothing in the log
+// to say so, and neither is a rate anybody means to ask for.
+func validateWebFlags(opts *webOptions) error {
+	// An empty namespace is not a narrower scope, it is every namespace: the
+	// client treats it as cluster-wide on list, and the public page would serve
+	// every Wish in the cluster while every reservation failed to resolve.
+	if opts.namespace == "" {
+		return errEmptyNamespace
+	}
+
+	if opts.trustedProxyHops < 0 {
+		return fmt.Errorf("%w, got %d", errNegativeProxyHops, opts.trustedProxyHops)
+	}
+
+	if math.IsNaN(opts.rateLimit) || math.IsInf(opts.rateLimit, 0) || opts.rateLimit <= 0 {
+		return fmt.Errorf("%w, got %v", errRateLimitInvalid, opts.rateLimit)
+	}
+
+	if opts.rateBurst < 1 {
+		return fmt.Errorf("%w, got %d", errRateBurstTooLow, opts.rateBurst)
+	}
+
+	return nil
+}
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -51,9 +131,9 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var webAddr string
-	var webNamespace string
-	var rateLimit float64
-	var rateBurst int
+
+	var webOpts webOptions
+
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
@@ -61,9 +141,7 @@ func main() {
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&webAddr, "web-bind-address", ":8080", "The address the web server binds to.")
-	flag.StringVar(&webNamespace, "web-namespace", "default", "The namespace to watch for Wish resources.")
-	flag.Float64Var(&rateLimit, "rate-limit", 30, "Rate limit requests per minute per IP.")
-	flag.IntVar(&rateBurst, "rate-burst", 10, "Rate limit burst size.")
+	bindWebFlags(flag.CommandLine, &webOpts)
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -85,6 +163,11 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if err := validateWebFlags(&webOpts); err != nil {
+		setupLog.Error(err, "invalid web server flags")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -196,12 +279,15 @@ func main() {
 	}
 
 	// Start web server
-	webServer := web.NewServer(mgr.GetClient(), webNamespace, rateLimit, rateBurst)
+	webServer := newWebServer(mgr.GetClient(), &webOpts)
 	if err := mgr.Add(&webRunnable{addr: webAddr, handler: webServer.Handler()}); err != nil {
 		setupLog.Error(err, "unable to add web server")
 		os.Exit(1)
 	}
-	setupLog.Info("web server configured", "address", webAddr, "namespace", webNamespace)
+	setupLog.Info("web server configured",
+		"address", webAddr,
+		"namespace", webOpts.namespace,
+		"trustedProxyHops", webOpts.trustedProxyHops)
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
@@ -214,27 +300,49 @@ func main() {
 type webRunnable struct {
 	addr    string
 	handler http.Handler
+	// shutdownTimeout overrides webShutdownTimeout; zero means the default.
+	shutdownTimeout time.Duration
 }
 
 func (w *webRunnable) Start(ctx context.Context) error {
 	server := &http.Server{
 		Addr:              w.addr,
 		Handler:           w.handler,
-		ReadHeaderTimeout: 10 * 1000000000, // 10 seconds in nanoseconds
+		ReadHeaderTimeout: webReadHeaderTimeout,
+	}
+
+	drained := make(chan struct{})
+
+	timeout := w.shutdownTimeout
+	if timeout == 0 {
+		timeout = webShutdownTimeout
 	}
 
 	go func() {
+		defer close(drained)
+
 		<-ctx.Done()
 
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*1000000000)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 		defer cancel()
 
-		_ = server.Shutdown(shutdownCtx)
+		// A timeout here means in-flight responses were cut mid-write. The
+		// runnable still stops cleanly, so without this line the only trace of
+		// a truncated rollout would be on the client side.
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "web server shutdown did not drain in time", "timeout", timeout)
+		}
 	}()
 
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+
+	// Shutdown closes the listeners first, so ListenAndServe returns while
+	// requests are still being served. Returning here would let the manager
+	// count this runnable as stopped and the process exit mid-response, which
+	// would make the shutdown timeout above mean nothing.
+	<-drained
 
 	return nil
 }
