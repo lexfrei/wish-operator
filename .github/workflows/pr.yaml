@@ -1,42 +1,85 @@
 name: PR Checks and Build
 
 on:
-  pull_request_target:
-    types: [opened, synchronize]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# The jobs that build and test run branch-controlled code, so the default grant
+# is read-only and the two jobs that need to write ask for it themselves.
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
 
 jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Run Trivy vulnerability scanner (filesystem)
-        uses: aquasecurity/trivy-action@master
+        id: trivy
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
 
+      # Code scanning uploads need a write token, which fork and Dependabot runs
+      # never get. Skip the upload there rather than fail the scan on a 403.
+      # The leading success() only restates the default: GitHub applies success()
+      # to any if: without a status-check function, so this step and the two
+      # below already run only when the scan succeeded.
+      # continue-on-error keeps a failed upload from failing the job, so that
+      # default success() on the two steps below stays true and the artifact
+      # fallback still runs; outcome remains 'failure' for them to read.
       - name: Upload Trivy filesystem results to GitHub Security
+        id: code_scanning
+        continue-on-error: true
+        if: >-
+          success() &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-fs-results.sarif'
           category: 'trivy-filesystem'
+
+      # Whenever there is a report but code scanning did not take it, whether it
+      # was skipped on a fork run or failed outright. Reading both outcomes
+      # rather than restating the condition inverted keeps the two in step, and
+      # gating on the scan means a failed scan produces one error, not three.
+      - name: Upload Trivy results as an artifact
+        id: trivy_artifact
+        if: >-
+          steps.trivy.outcome == 'success' &&
+          steps.code_scanning.outcome != 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-fs-results
+          path: trivy-fs-results.sarif
+          if-no-files-found: error
+          retention-days: 7
+
+      # A retained artifact nobody knows about is still a lost report.
+      - name: Say where the Trivy report went
+        if: steps.trivy_artifact.outcome == 'success'
+        run: |
+          {
+            echo "## Trivy"
+            echo ""
+            echo "Code scanning did not take this report, either because the run has no"
+            echo "permission to upload or because the upload failed. It is attached as the"
+            echo "\`trivy-fs-results\` artifact instead: ${{ steps.trivy_artifact.outputs.artifact-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     name: Lint
@@ -44,8 +87,6 @@ jobs:
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -72,8 +113,6 @@ jobs:
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -89,12 +128,17 @@ jobs:
 
       - name: Setup envtest
         run: |
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
           setup-envtest use
 
       - name: Run tests
         run: |
-          export KUBEBUILDER_ASSETS="$(setup-envtest use -p path)"
+          # Assign and export separately: export is a builtin whose own exit
+          # status masks a failing command substitution, so a broken
+          # setup-envtest would otherwise run the suite with no assets at all.
+          KUBEBUILDER_ASSETS="$(setup-envtest use -p path)"
+          export KUBEBUILDER_ASSETS
           go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v /test/e2e)
 
       - name: Upload coverage
@@ -111,13 +155,13 @@ jobs:
       - name: Checkout PR code
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
         with:
-          version: 'latest'
+          # renovate: datasource=github-releases depName=helm/helm
+          version: v4.2.3
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -129,7 +173,8 @@ jobs:
 
       - name: Install tools
         run: |
-          helm plugin install https://github.com/helm-unittest/helm-unittest.git --verify=false
+          # renovate: datasource=github-releases depName=helm-unittest/helm-unittest
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git --version 1.1.2 --verify=false
           pip install check-jsonschema
 
       - name: Run Helm Lint
@@ -176,8 +221,6 @@ jobs:
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -190,8 +233,12 @@ jobs:
           file: ./Containerfile
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=ttl.sh/wish-operator,push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=build-${{ matrix.arch }}
-          cache-to: type=gha,scope=build-${{ matrix.arch }},mode=max
+          # No build cache. Per-PR scopes multiply the repository budget by the
+          # number of open branches, and nothing writes a scope a PR can read.
+          # The image is built from the merge commit, but REVISION names the
+          # head commit: the merge SHA is ephemeral and unresolvable once the
+          # PR moves on, and the delta between them is base-branch code the PR
+          # already identifies. The mismatch is deliberate, not an oversight.
           build-args: |
             VERSION=pr-${{ github.event.pull_request.number }}
             REVISION=${{ github.event.pull_request.head.sha }}
@@ -279,13 +326,12 @@ jobs:
     steps:
       - name: Checkout PR code
         uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
         with:
-          version: 'latest'
+          # renovate: datasource=github-releases depName=helm/helm
+          version: v4.2.3
 
       - name: Modify Chart.yaml and values.yaml
         run: |
@@ -348,6 +394,18 @@ jobs:
     name: Notify PR
     needs: [merge-manifests, build-chart]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    # Labelling and commenting need a write token, which fork and Dependabot
+    # runs never get, so those PRs no longer get the image and chart comment.
+    # The leading success() only restates the default GitHub applies to an if:
+    # without a status-check function, so this runs only when the needed jobs
+    # succeeded and never advertises an image the build did not push.
+    if: >-
+      success() &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
     steps:
       - name: Check if first build
         id: first_build
