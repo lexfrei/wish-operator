@@ -38,6 +38,12 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	// Version and GitSHA are set at build time via -ldflags. The Containerfile
+	// references them by these exact paths, so renaming either one silently
+	// drops the value instead of failing the build.
+	Version = "development"
+	GitSHA  = "development"
 )
 
 func init() {
@@ -64,7 +70,9 @@ type webOptions struct {
 
 // bindWebFlags registers the web server flags on flagSet.
 func bindWebFlags(flagSet *flag.FlagSet, opts *webOptions) {
-	flagSet.StringVar(&opts.namespace, "web-namespace", "default", "The namespace to watch for Wish resources.")
+	flagSet.StringVar(&opts.namespace, "web-namespace", "default",
+		"The namespace whose Wishes the web UI lists and reserves. "+
+			"The controller reconciles Wishes in all namespaces regardless of this.")
 	flagSet.IntVar(&opts.trustedProxyHops, "trusted-proxy-hops", 0,
 		"Number of proxies in front of the web server that append to X-Forwarded-For. "+
 			"Rate limiting reads the client address from that many entries counted from the right. "+
@@ -123,7 +131,6 @@ func validateWebFlags(opts *webOptions) error {
 	return nil
 }
 
-// nolint:gocyclo
 func main() {
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
@@ -163,6 +170,8 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	setupLog.Info("build info", "version", Version, "gitSHA", GitSHA)
 
 	if err := validateWebFlags(&webOpts); err != nil {
 		setupLog.Error(err, "invalid web server flags")
@@ -302,6 +311,15 @@ type webRunnable struct {
 	handler http.Handler
 	// shutdownTimeout overrides webShutdownTimeout; zero means the default.
 	shutdownTimeout time.Duration
+}
+
+// NeedLeaderElection keeps the web server out of the leader-election group so it
+// answers on every replica. With leader election enabled, runnables that do not
+// implement this interface start only on the leader, which would leave the Service
+// routing to pods with nothing listening on the web port. With it disabled every
+// runnable starts everywhere, so this only matters once leader election is on.
+func (w *webRunnable) NeedLeaderElection() bool {
+	return false
 }
 
 func (w *webRunnable) Start(ctx context.Context) error {

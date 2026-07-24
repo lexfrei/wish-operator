@@ -23,6 +23,7 @@ cmd/                   # Entry point (main.go)
 internal/controller/   # Reconciler logic
 internal/web/          # HTTP server + handlers
 internal/templates/    # Templ files
+internal/i18n/         # Language selection and translations
 charts/wish-operator/  # Helm chart
 ```
 
@@ -32,8 +33,8 @@ charts/wish-operator/  # Helm chart
 # Generate deepcopy and CRD manifests
 make manifests generate
 
-# Run tests
-go test ./...
+# Run tests (fetches the envtest control-plane binaries first)
+make test
 
 # Build
 make build

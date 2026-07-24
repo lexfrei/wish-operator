@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	"math"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +61,8 @@ type WishSpec struct {
 	// +optional
 	Description string `json:"description,omitempty"`
 
-	// Priority indicates importance (1-5, displayed as stars).
+	// Priority indicates importance, displayed as that many stars.
+	// 0 is the unset value and renders no stars at all.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=5
 	// +optional
@@ -191,8 +193,7 @@ func (w *Wish) TotalReserved() int32 {
 // For unlimited wishes (quantity == 0), returns math.MaxInt32.
 func (w *Wish) AvailableQuantity() int32 {
 	if w.IsUnlimited() {
-		//nolint:mnd // MaxInt32 value for unlimited quantity
-		return 2147483647 // math.MaxInt32
+		return math.MaxInt32
 	}
 
 	available := w.GetQuantity() - w.TotalReserved()

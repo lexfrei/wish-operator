@@ -8,7 +8,7 @@
       "type": "integer",
       "minimum": 1,
       "default": 1,
-      "description": "Number of replicas for the operator deployment"
+      "description": "Number of replicas for the operator deployment. Values above 1 require operator.leaderElection: true and the chart refuses to render otherwise"
     },
     "image": {
       "type": "object",
@@ -286,14 +286,14 @@
         "namespace": {
           "type": "string",
           "default": "default",
-          "description": "Namespace to watch for Wish resources"
+          "description": "Namespace whose Wishes the web UI lists and reserves. The controller reconciles Wishes in all namespaces regardless of this"
         },
         "rateLimit": {
           "type": "number",
           "minimum": 1,
           "maximum": 1000,
           "default": 30,
-          "description": "Rate limit (requests per second per IP)"
+          "description": "Rate limit (requests per second per IP, counted per replica)"
         },
         "rateBurst": {
           "type": "integer",
@@ -312,7 +312,7 @@
         "leaderElection": {
           "type": "boolean",
           "default": false,
-          "description": "Enable leader election for HA deployments"
+          "description": "Enable leader election for HA deployments. Required when replicaCount is above 1"
         }
       },
       "additionalProperties": false

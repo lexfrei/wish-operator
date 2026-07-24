@@ -10,6 +10,7 @@ Kubernetes operator for managing wishlists. Create wishes as Kubernetes resource
 - **Reservations** — multiple anonymous reservations per wish, 1-8 weeks with automatic expiration
 - **TTL** — wishes can auto-expire after a defined duration
 - **Rate limiting** — per-IP rate limiting to prevent abuse, see [Client addresses behind a proxy](#client-addresses-behind-a-proxy)
+- **Multi-language UI** — language from the `?lang=` parameter, then `Accept-Language`, falling back to English
 - **Gateway API** — HTTPRoute support for ingress via Gateway API
 
 ## Installation
@@ -21,6 +22,15 @@ helm install wish-operator oci://ghcr.io/lexfrei/charts/wish-operator \
   --namespace wish-operator \
   --create-namespace
 ```
+
+Helm installs the CRDs from the chart's `crds/` directory only on the first install and never touches them on upgrade. After upgrading to a release that changes the CRD, pull the chart and apply the updated definitions once:
+
+```bash
+helm pull oci://ghcr.io/lexfrei/charts/wish-operator --version <CHART_VERSION> --untar
+kubectl apply --filename wish-operator/crds/
+```
+
+Breaking change: `replicaCount` above 1 now requires `operator.leaderElection: true`, and the chart fails to render otherwise. Earlier versions accepted that combination and ran every replica as an active reconciler, which raced on the same objects. If your release sets `replicaCount` above 1, add `--set operator.leaderElection=true` to the upgrade.
 
 ### With HTTPRoute
 
@@ -76,7 +86,7 @@ spec:
 | `tags` | []string | Category labels |
 | `contextTags` | []string | Occasions (birthday, christmas) |
 | `ttl` | duration | Auto-expire after this duration |
-| `quantity` | int32 | Number of items available (default: 1) |
+| `quantity` | int32 | Number of items available (default: 1); 0 means unlimited |
 
 ### Wish Status
 
@@ -84,6 +94,8 @@ spec:
 |-------|-------------|
 | `active` | Whether wish is within TTL |
 | `reservations` | List of active reservations (quantity, createdAt, expiresAt) |
+| `conditions` | Reserved for future use; nothing writes it yet, so do not wait on it |
+| `reserved`, `reservedAt`, `reservationExpires` | Deprecated single-reservation fields, superseded by `reservations` |
 
 ## Configuration
 
@@ -91,11 +103,12 @@ spec:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `replicaCount` | 1 | Number of replicas |
+| `replicaCount` | 1 | Number of replicas; above 1 requires `operator.leaderElection` |
+| `operator.leaderElection` | false | Elect a single active reconciler; required for multiple replicas |
 | `image.repository` | ghcr.io/lexfrei/wish-operator | Image repository |
 | `image.tag` | "" | Image tag (defaults to chart appVersion) |
-| `operator.namespace` | default | Namespace to watch for Wishes |
-| `operator.rateLimit` | 30 | Requests per second per IP |
+| `operator.namespace` | default | Namespace the web UI serves Wishes from; the controller reconciles all namespaces |
+| `operator.rateLimit` | 30 | Requests per second per IP, counted per replica |
 | `operator.rateBurst` | 10 | Burst size for rate limiting |
 | `operator.trustedProxyHops` | 0 | Proxies in front that append to `X-Forwarded-For` (0 ignores the header) |
 | `httpRoute.enabled` | false | Create HTTPRoute resource |
@@ -134,8 +147,8 @@ make build
 ### Test
 
 ```bash
-# Go tests
-go test ./...
+# Go tests (fetches the envtest control-plane binaries first)
+make test
 
 # Helm tests
 helm unittest charts/wish-operator

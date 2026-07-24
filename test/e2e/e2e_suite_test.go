@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright (c) 2025 Aleksei Sviridkin
 
+//go:build e2e
+
 package e2e
 
 import (

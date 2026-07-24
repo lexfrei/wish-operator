@@ -109,6 +109,83 @@ func TestServer_HandleIndex(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), testTitleGift)
 }
 
+// The CRD sets Minimum=0 on priority and the docs call 0 the unset value, so the
+// card must render no star row at all for it. Everything else pins that contract
+// as prose; this pins it as behaviour.
+func TestServer_HandleIndex_PriorityZeroRendersNoStars(t *testing.T) {
+	t.Parallel()
+
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "unset-priority",
+			Namespace: testNamespace,
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    testTitleGift,
+			Priority: 0,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), testTitleGift)
+	// Assert on the glyphs rather than the class name, which a restyle could
+	// rename to "stars filled" and quietly turn this green while stars render.
+	assert.NotContains(t, rec.Body.String(), "★", "priority 0 must not render filled stars")
+	assert.NotContains(t, rec.Body.String(), "☆", "priority 0 must not render the star row at all")
+}
+
+// The zero case above only certifies something if the nonzero cases are pinned
+// too: without these, deleting the star row from the template leaves the whole
+// suite green and the negative assertion greener still.
+func TestServer_HandleIndex_PriorityRendersStars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		priority int32
+		expected string
+	}{
+		{"partial priority fills that many stars", 3, "★★★☆☆"},
+		{"maximum priority fills every star", 5, "★★★★★"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			wish := &wishlistv1alpha1.Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "starred-wish",
+					Namespace: testNamespace,
+				},
+				Spec: wishlistv1alpha1.WishSpec{
+					Title:    testTitleGift,
+					Priority: tt.priority,
+				},
+				Status: wishlistv1alpha1.WishStatus{
+					Active: true,
+				},
+			}
+
+			srv := newTestServer(t, wish)
+			rec := httptest.NewRecorder()
+
+			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Contains(t, rec.Body.String(), tt.expected)
+		})
+	}
+}
+
 func TestServer_HandleWishes(t *testing.T) {
 	t.Parallel()
 
@@ -443,6 +520,24 @@ func TestServer_RotatingHeaderExhaustsOneBudget(t *testing.T) {
 			assert.Len(t, srv.limiters, 1, "a rotating header must not mint limiters")
 		})
 	}
+}
+
+// rateLimit is fed straight into rate.Limit, which counts events per second. The
+// --rate-limit flag help used to advertise it as a per-minute budget, off by a
+// factor of sixty. Pin the refill interval so the two cannot drift apart again.
+func TestServer_RateLimitIsPerSecond(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t)
+	srv.rateLimit = 1
+	srv.rateBurst = 1
+
+	limiter := srv.getLimiter("192.0.2.1")
+	require.True(t, limiter.Allow(), "burst token should be available immediately")
+
+	delay := limiter.Reserve().Delay()
+	assert.Less(t, delay, 2*time.Second, "one token per second, not per minute")
+	assert.Greater(t, delay, 500*time.Millisecond, "refill should still be throttled")
 }
 
 func TestServer_HandleReserve_Unlimited(t *testing.T) {

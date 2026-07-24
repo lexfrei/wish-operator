@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -646,7 +647,7 @@ func TestWish_AvailableQuantity_Unlimited(t *testing.T) {
 			}
 			result := wish.AvailableQuantity()
 			if tt.wantLarge {
-				assert.Greater(t, result, int32(1000000), "unlimited should return very large number")
+				assert.Equal(t, int32(math.MaxInt32), result, "unlimited should saturate at math.MaxInt32")
 			} else {
 				assert.Equal(t, tt.wantExact, result)
 			}

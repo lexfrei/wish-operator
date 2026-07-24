@@ -22,7 +22,7 @@ COPY . .
 RUN templ generate
 
 # Build and compress
-RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.Version=${VERSION} -X main.Gitsha=${REVISION}" -trimpath -o manager ./cmd/ && \
+RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.Version=${VERSION} -X main.GitSHA=${REVISION}" -trimpath -o manager ./cmd/ && \
     upx --best --lzma manager
 
 FROM scratch
