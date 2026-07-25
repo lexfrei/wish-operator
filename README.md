@@ -210,6 +210,10 @@ make install    # Install CRDs
 make run        # Run controller locally
 ```
 
+### Dependency updates
+
+Renovate policy for this repository lives in the shared [lexfrei/renovate-config](https://github.com/lexfrei/renovate-config) preset, which `renovate.json` extends. That preset is where the automerge rules live, along with the group that keeps `controller-runtime` and the `k8s.io/*` libraries moving together — splitting that pair breaks compilation, because a given controller-runtime release needs the matching client-go.
+
 ## License
 
 BSD-3-Clause. See [LICENSE](LICENSE).
