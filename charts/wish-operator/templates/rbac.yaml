@@ -46,3 +46,50 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "wish-operator.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
+{{- if .Values.operator.leaderElection }}
+---
+# controller-runtime holds the leader lock in a Lease in its own namespace and
+# emits events as leadership changes hands. Without these the manager retries a
+# 403 forever: the pod stays ready and serves the web UI, but reconciles nothing.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "wish-operator.fullname" . }}-leader-election
+  labels:
+    {{- include "wish-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "wish-operator.fullname" . }}-leader-election
+  labels:
+    {{- include "wish-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "wish-operator.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "wish-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

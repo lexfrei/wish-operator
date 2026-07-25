@@ -40,13 +40,24 @@ tests:
           path: spec.replicas
           value: 1
 
-  - it: should allow custom replica count
+  - it: should allow custom replica count with leader election enabled
     set:
       replicaCount: 3
+      operator.leaderElection: true
     asserts:
       - equal:
           path: spec.replicas
           value: 3
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --leader-elect
+
+  - it: should refuse multiple replicas without leader election
+    set:
+      replicaCount: 3
+    asserts:
+      - failedTemplate:
+          errorMessage: "replicaCount above 1 requires operator.leaderElection=true: without it every replica reconciles the same objects concurrently"
 
   # Security - Pod level
   - it: should run as non-root

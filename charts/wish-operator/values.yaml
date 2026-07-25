@@ -1,3 +1,8 @@
+# Values above 1 require operator.leaderElection: true and the chart refuses to
+# render without it, because otherwise every replica reconciles the same objects
+# concurrently. The web UI is served from every replica either way, and each one
+# rate-limits independently, so the effective per-IP budget is
+# operator.rateLimit multiplied by replicaCount.
 replicaCount: 1
 
 image:
@@ -50,7 +55,11 @@ affinity: {}
 
 # Operator settings
 operator:
+  # Scopes the web UI only. The ClusterRole is cluster-wide and the controller
+  # reconciles Wishes in all namespaces regardless of this value.
   namespace: default
+  # Requests per second per IP. Each replica keeps its own limiter, so the budget
+  # a single client actually gets is this value multiplied by replicaCount.
   rateLimit: 30
   rateBurst: 10
   # Number of proxies in front of the web server that append to X-Forwarded-For.
@@ -59,6 +68,7 @@ operator:
   # ignored and the connection address is used, because anything else is
   # supplied by the caller and lets it pick its own rate limit bucket.
   trustedProxyHops: 0
+  # Required when replicaCount is above 1; the chart refuses to render otherwise.
   leaderElection: false
 
 # Gateway API HTTPRoute

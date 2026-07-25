@@ -1,3 +1,6 @@
+{{- if and (gt (int .Values.replicaCount) 1) (not .Values.operator.leaderElection) }}
+{{- fail "replicaCount above 1 requires operator.leaderElection=true: without it every replica reconciles the same objects concurrently" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

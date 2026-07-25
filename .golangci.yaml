@@ -1,11 +1,19 @@
 version: "2"
 
+run:
+  # The e2e suite is behind //go:build e2e, so without this it is not a package
+  # for anything walking ./... and stops being compile-checked at all.
+  build-tags:
+    - e2e
+
 linters:
   default: all
   disable:
     - depguard
     - exhaustruct
     - gochecknoinits
+    # Superseded by gomodguard_v2, which "default: all" already enables.
+    - gomodguard
     - wsl
     - lll
     - errchkjson
