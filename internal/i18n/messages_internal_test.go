@@ -316,3 +316,57 @@ func translationKeyOf(call *ast.CallExpr) (string, bool) {
 
 	return key, true
 }
+
+// languageSpecificKeys are plural forms that exist only where the grammar
+// needs them. Weeks asks for these by language rather than by the caller's
+// locale, so they have no English counterpart and never will.
+func languageSpecificKeys() map[string]bool {
+	return map[string]bool{
+		keyWeeksFew:  true,
+		keyWeeksMany: true,
+	}
+}
+
+// TestMessagesCoverEveryLanguage pins two things TestCatalogsCoverEnglish does
+// not: that a format key keeps the same number of %d and %s verbs across
+// languages, since a translation that drops one renders %!s(MISSING) at
+// runtime; and that no catalog carries a key English lacks, which is usually a
+// typo, because every lookup starts from an English key. The one legitimate
+// exception is grammar English does not have, listed in languageSpecificKeys.
+func TestMessagesCoverEveryLanguage(t *testing.T) {
+	t.Parallel()
+
+	verbs := []string{"%d", "%s"}
+	pluralOnly := languageSpecificKeys()
+
+	for _, lang := range supportedLangs {
+		if lang == LangEN {
+			continue
+		}
+
+		for key, english := range messages[LangEN] {
+			translated, ok := messages[lang][key]
+			if !ok {
+				t.Errorf("catalog %q is missing key %q", lang, key)
+
+				continue
+			}
+
+			for _, verb := range verbs {
+				if strings.Count(english, verb) != strings.Count(translated, verb) {
+					t.Errorf("%s translation of %q has a different number of %s verbs", lang, key, verb)
+				}
+			}
+		}
+
+		for key := range messages[lang] {
+			if pluralOnly[key] {
+				continue
+			}
+
+			if _, ok := messages[LangEN][key]; !ok {
+				t.Errorf("%s has key %q that English does not", lang, key)
+			}
+		}
+	}
+}

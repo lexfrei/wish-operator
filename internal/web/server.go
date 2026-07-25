@@ -5,6 +5,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
@@ -17,7 +18,10 @@ import (
 	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
@@ -50,6 +54,37 @@ const (
 	ipv6BucketBits = 64
 )
 
+// Terminal reservation outcomes. Each maps to a distinct HTTP response.
+var (
+	errWishNotFound      = errors.New("wish not found")
+	errWishExpired       = errors.New("wish is past its TTL")
+	errGetWish           = errors.New("cannot read wish")
+	errFullyReserved     = errors.New("wish is fully reserved")
+	errReservationLimit  = errors.New("wish holds as many reservations as it can")
+	errInvalidQuantity   = errors.New("quantity is not a positive number")
+	errReserveIncomplete = errors.New("reservation was never attempted")
+)
+
+// quantityExceededError reports that fewer items are left than were requested.
+type quantityExceededError struct {
+	available int32
+}
+
+func (e *quantityExceededError) Error() string {
+	return fmt.Sprintf("requested quantity exceeds the %d available", e.available)
+}
+
+// perRequestLimitError reports that one reservation may not claim this many.
+// Distinct from quantityExceededError: an unlimited wish has nothing to run
+// out of, so telling its visitor how many are "available" would be false.
+type perRequestLimitError struct {
+	limit int32
+}
+
+func (e *perRequestLimitError) Error() string {
+	return fmt.Sprintf("one reservation claims at most %d items", e.limit)
+}
+
 // limiterEntry pairs a per-IP limiter with the last time it was accessed, so
 // idle entries can be evicted instead of growing the map without bound.
 type limiterEntry struct {
@@ -60,6 +95,7 @@ type limiterEntry struct {
 // Server handles HTTP requests for the wishlist web interface.
 type Server struct {
 	client    client.Client
+	reader    client.Reader
 	namespace string
 	rateLimit float64
 	rateBurst int
@@ -67,6 +103,10 @@ type Server struct {
 	// trustedProxyHops is how many proxies append to X-Forwarded-For in front
 	// of this server. Zero means proxy headers are ignored entirely.
 	trustedProxyHops int
+
+	// backoff is the retry schedule for reservation conflicts, a field so a
+	// test can inject one that never runs.
+	backoff wait.Backoff
 
 	// now is the injectable time source, overridden in tests for deterministic
 	// eviction behaviour.
@@ -77,12 +117,15 @@ type Server struct {
 	lastSweep  time.Time
 }
 
-// NewServer creates a new web server. trustedProxyHops declares how many
-// proxies in front of this server append to X-Forwarded-For; use 0 when the
-// server is reachable directly, so that client-supplied proxy headers are
-// ignored.
+// NewServer creates a new web server. The reader must bypass the informer
+// cache: reserving re-reads a wish after a conflict, and a cached read would
+// keep handing back the same stale object the conflict was about.
+// trustedProxyHops declares how many proxies in front of this server append to
+// X-Forwarded-For; use 0 when the server is reachable directly, so that
+// client-supplied proxy headers are ignored.
 func NewServer(
 	c client.Client,
+	reader client.Reader,
 	namespace string,
 	trustedProxyHops int,
 	rateLimit float64,
@@ -90,10 +133,12 @@ func NewServer(
 ) *Server {
 	return &Server{
 		client:           c,
+		reader:           reader,
 		namespace:        namespace,
 		trustedProxyHops: trustedProxyHops,
 		rateLimit:        rateLimit,
 		rateBurst:        rateBurst,
+		backoff:          retry.DefaultRetry,
 		now:              time.Now,
 		limiters:         make(map[string]*limiterEntry),
 	}
@@ -146,7 +191,6 @@ func (s *Server) renderWishPage(w http.ResponseWriter, r *http.Request, fullPage
 	}
 }
 
-//nolint:funlen // Main reserve handler with validation logic
 func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 	lang := i18n.DetectLanguage(r)
 	name := r.PathValue("name")
@@ -172,61 +216,16 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse quantity (default to 1)
-	quantity := int32(1)
-	if qStr := r.FormValue("quantity"); qStr != "" {
-		q, err := strconv.ParseInt(qStr, 10, 32)
-		if err != nil || q < 1 {
-			http.Error(w, i18n.T(lang, "err_invalid_quantity"), http.StatusBadRequest)
-
-			return
-		}
-
-		quantity = int32(q)
-	}
-
-	wish := &wishlistv1alpha1.Wish{}
-	if err := s.client.Get(r.Context(), client.ObjectKey{Name: name, Namespace: s.namespace}, wish); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			http.Error(w, i18n.T(lang, "err_not_found"), http.StatusNotFound)
-
-			return
-		}
-
-		http.Error(w, i18n.T(lang, "err_get_wish"), http.StatusInternalServerError)
+	quantity, err := parseQuantity(r.FormValue("quantity"))
+	if err != nil {
+		writeReserveError(w, lang, err)
 
 		return
 	}
 
-	// Check availability using new Reservations model
-	// Skip validation for unlimited wishes (quantity == 0)
-	if !wish.IsUnlimited() {
-		available := wish.AvailableQuantity()
-		if available == 0 {
-			http.Error(w, i18n.T(lang, "err_fully_reserved"), http.StatusConflict)
-
-			return
-		}
-
-		if quantity > available {
-			http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_exceeds"), available), http.StatusBadRequest)
-
-			return
-		}
-	}
-
-	// Create new reservation in new format
-	now := metav1.Now()
-	expires := metav1.NewTime(now.Add(time.Duration(weeks) * 7 * 24 * time.Hour))
-
-	wish.Status.Reservations = append(wish.Status.Reservations, wishlistv1alpha1.Reservation{
-		Quantity:  quantity,
-		CreatedAt: now,
-		ExpiresAt: expires,
-	})
-
-	if err := s.client.Status().Update(r.Context(), wish); err != nil {
-		http.Error(w, i18n.T(lang, "err_reserve_failed"), http.StatusInternalServerError)
+	wish, err := s.reserve(r.Context(), name, weeks, quantity)
+	if err != nil {
+		writeReserveError(w, lang, err)
 
 		return
 	}
@@ -235,6 +234,156 @@ func (s *Server) handleReserve(w http.ResponseWriter, r *http.Request) {
 
 	if err := templates.WishCard(wish, lang).Render(r.Context(), w); err != nil {
 		http.Error(w, i18n.T(lang, "err_render"), http.StatusInternalServerError)
+	}
+}
+
+// reserve appends a reservation to a wish, retrying the whole read-check-write
+// cycle whenever the API server rejects the update with a conflict. Every
+// attempt re-reads the wish through the uncached reader, so availability is
+// checked against the state the reservation is about to be written on top of,
+// including the write that caused the conflict.
+func (s *Server) reserve(
+	ctx context.Context,
+	name string,
+	weeks int,
+	quantity int32,
+) (*wishlistv1alpha1.Wish, error) {
+	var reserved *wishlistv1alpha1.Wish
+
+	err := retry.RetryOnConflict(s.backoff, func() error {
+		wish := &wishlistv1alpha1.Wish{}
+		if err := s.reader.Get(ctx, client.ObjectKey{Name: name, Namespace: s.namespace}, wish); err != nil {
+			if apierrors.IsNotFound(err) {
+				return errWishNotFound
+			}
+
+			return fmt.Errorf("%w: %w", errGetWish, err)
+		}
+
+		// listWishes hides a wish once its TTL runs out; a POST straight at the
+		// name must not be a way around that.
+		if wish.IsExpired() {
+			return errWishExpired
+		}
+
+		if err := checkAvailability(wish, quantity); err != nil {
+			return err
+		}
+
+		now := metav1.Now()
+		expires := metav1.NewTime(now.Add(time.Duration(weeks) * 7 * 24 * time.Hour))
+
+		// Append onto the active ones only: expired entries hold nothing, and
+		// writing them back would re-persist state this code does not believe in.
+		wish.Status.Reservations = append(wish.ActiveReservations(), wishlistv1alpha1.Reservation{
+			Quantity:  quantity,
+			CreatedAt: now,
+			ExpiresAt: expires,
+		})
+
+		if err := s.client.Status().Update(ctx, wish); err != nil {
+			return err
+		}
+
+		reserved = wish
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// A backoff that never runs the closure returns no error and no wish, and
+	// the caller would render a nil card. Nothing produces that today, but the
+	// only thing standing between here and a panic is a constant in client-go.
+	if reserved == nil {
+		return nil, errReserveIncomplete
+	}
+
+	return reserved, nil
+}
+
+// parseQuantity reads the requested quantity, defaulting to a single item.
+func parseQuantity(value string) (int32, error) {
+	if value == "" {
+		return 1, nil
+	}
+
+	quantity, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", errInvalidQuantity, err)
+	}
+
+	if quantity < 1 {
+		return 0, errInvalidQuantity
+	}
+
+	return int32(quantity), nil
+}
+
+// checkAvailability reports whether the wish can still take the requested
+// quantity. It answers with the same numbers the card renders, so anything the
+// form offers is something this accepts.
+func checkAvailability(wish *wishlistv1alpha1.Wish, quantity int32) error {
+	if wish.AtReservationLimit() {
+		return errReservationLimit
+	}
+
+	// A wish with declared stock is bounded by what is left of it, and that is
+	// the number worth reporting. The per-request limit only has to speak for
+	// unlimited wishes, where nothing else would.
+	if !wish.IsUnlimited() {
+		available := wish.AvailableQuantity()
+		if available == 0 {
+			return errFullyReserved
+		}
+
+		if quantity > available {
+			return &quantityExceededError{available: available}
+		}
+
+		return nil
+	}
+
+	if quantity > wishlistv1alpha1.MaxQuantityPerRequest {
+		return &perRequestLimitError{limit: wishlistv1alpha1.MaxQuantityPerRequest}
+	}
+
+	return nil
+}
+
+// writeReserveError maps a reservation failure to its HTTP response.
+func writeReserveError(w http.ResponseWriter, lang string, err error) {
+	var (
+		exceeded   *quantityExceededError
+		perRequest *perRequestLimitError
+	)
+
+	switch {
+	// A wish deleted between the read and the write is gone the same way a
+	// wish that was never there is gone.
+	case errors.Is(err, errWishNotFound), errors.Is(err, errWishExpired), apierrors.IsNotFound(err):
+		http.Error(w, i18n.T(lang, "err_not_found"), http.StatusNotFound)
+	case errors.Is(err, errInvalidQuantity):
+		http.Error(w, i18n.T(lang, "err_invalid_quantity"), http.StatusBadRequest)
+	case errors.Is(err, errGetWish):
+		http.Error(w, i18n.T(lang, "err_get_wish"), http.StatusInternalServerError)
+	case errors.Is(err, errFullyReserved):
+		http.Error(w, i18n.T(lang, "err_fully_reserved"), http.StatusConflict)
+	case errors.Is(err, errReservationLimit):
+		http.Error(w, i18n.T(lang, "err_reservation_limit"), http.StatusConflict)
+	case errors.As(err, &exceeded):
+		http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_exceeds"), exceeded.available), http.StatusBadRequest)
+	case errors.As(err, &perRequest):
+		http.Error(w, fmt.Sprintf(i18n.T(lang, "err_quantity_per_request"), perRequest.limit), http.StatusBadRequest)
+	case apierrors.IsConflict(err):
+		// Retries ran out while the wish was under contention. The status code
+		// and Retry-After say so to a machine; the body is the only part a
+		// visitor sees, so it must not read like a broken server.
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, i18n.T(lang, "err_reserve_busy"), http.StatusServiceUnavailable)
+	default:
+		http.Error(w, i18n.T(lang, "err_reserve_failed"), http.StatusInternalServerError)
 	}
 }
 
@@ -250,7 +399,12 @@ func (s *Server) listWishes(ctx context.Context, filterTag string) ([]wishlistv1
 
 	for i := range wishList.Items {
 		wish := &wishList.Items[i]
-		if !wish.Status.Active {
+
+		// The same predicate the reserve path uses. Status.Active says the same
+		// thing, but only once the controller has caught up: a wish that has
+		// never been reconciled would be hidden here while still reservable,
+		// and one whose TTL just passed would be listed while already refused.
+		if wish.IsExpired() {
 			continue
 		}
 

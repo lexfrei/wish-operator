@@ -30,7 +30,16 @@ func repeatRune(r rune, count int) string {
 }
 
 templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
-	<div id={ fmt.Sprintf("wish-%s", wish.Name) } class={ "wish-card", templ.KV("fully-reserved", wish.IsFullyReserved()) }>
+	// Both of these walk the reservation slice and ActiveReservations
+	// allocates, so ask once per card rather than once per mention.
+	{{ reservable := wish.MaxReservableQuantity() }}
+	{{ active := wish.ActiveReservations() }}
+	{{ atLimit := wish.AtReservationLimit() }}
+	<div
+		id={ fmt.Sprintf("wish-%s", wish.Name) }
+		class={ "wish-card",
+			templ.KV("fully-reserved", wish.IsFullyReserved() || atLimit) }
+	>
 		if wish.Spec.ImageURL != "" {
 			<img src={ wish.Spec.ImageURL } alt={ wish.Spec.Title }/>
 		}
@@ -77,34 +86,35 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 			</div>
 		}
 		// Show reservation list
-		if len(wish.ActiveReservations()) > 0 {
+		if len(active) > 0 {
 			<div class="reservations-list">
-				for _, res := range wish.ActiveReservations() {
+				for _, res := range active {
 					<div class="reservation-item">
 						{ fmt.Sprintf(i18n.T(lang, "reserved_count"), res.Quantity, i18n.FormatDate(lang, res.ExpiresAt.Time)) }
 					</div>
 				}
 			</div>
 		}
-		// Reserve form - show if unlimited or items available
-		if wish.IsUnlimited() || wish.AvailableQuantity() > 0 {
+		// Reserve form - shown only for what the server will actually accept
+		if reservable > 0 {
 			<form
 				class="reserve-form"
 				hx-post={ fmt.Sprintf("/wishes/%s/reserve?lang=%s", wish.Name, lang) }
 				hx-target={ fmt.Sprintf("#wish-%s", wish.Name) }
 				hx-swap="outerHTML"
 			>
-				// Quantity selector
-				if wish.IsUnlimited() {
-					// For unlimited, show number input
-					<input type="number" name="quantity" value="1" min="1" required/>
-				} else if wish.AvailableQuantity() > 1 {
-					// For limited, show dropdown
-					<select name="quantity" required>
-						for i := int32(1); i <= wish.AvailableQuantity(); i++ {
-							<option value={ fmt.Sprintf("%d", i) }>{ fmt.Sprintf("%d", i) }</option>
-						}
-					</select>
+				// Quantity selector, bounded by whatever the server will accept.
+				// A number input rather than one option per item: the stock has no
+				// upper bound in the schema, so a dropdown is a page-size hazard.
+				if reservable > 1 {
+					<input
+						type="number"
+						name="quantity"
+						value="1"
+						min="1"
+						max={ fmt.Sprintf("%d", reservable) }
+						required
+					/>
 				}
 				<select name="weeks" required>
 					<option value="1">{ fmt.Sprintf("1 %s", i18n.T(lang, "week_one")) }</option>
@@ -118,6 +128,11 @@ templ WishCard(wish *wishlistv1alpha1.Wish, lang string) {
 				</select>
 				<button type="submit">{ i18n.T(lang, "reserve_btn") }</button>
 			</form>
+		} else if atLimit {
+			// Stock may well be left; what ran out is room for another entry.
+			<div class="fully-reserved-badge">
+				{ i18n.T(lang, "err_reservation_limit") }
+			</div>
 		} else {
 			<div class="fully-reserved-badge">
 				{ i18n.T(lang, "err_fully_reserved") }

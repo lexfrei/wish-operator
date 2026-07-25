@@ -4,9 +4,26 @@
 package templates
 
 import (
+	"net/url"
+
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
 	"github.com/lexfrei/wish-operator/internal/i18n"
 )
+
+// refreshURL is the /wishes list the error banner reloads after a 409. It
+// carries the active tag so refreshing a filtered list does not silently reset
+// it to "All", and it is built with url.Values so a tag with a space or an
+// ampersand produces a valid query rather than a broken one.
+func refreshURL(lang, activeTag string) string {
+	q := url.Values{}
+	q.Set("lang", lang)
+
+	if activeTag != "" {
+		q.Set("tag", activeTag)
+	}
+
+	return "/wishes?" + q.Encode()
+}
 
 templ FilterBar(allTags []string, activeTag string, lang string) {
 	if len(allTags) > 0 {
@@ -112,7 +129,8 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 				.wish-card .purchase-links { margin-bottom: 1rem; font-size: 0.875rem; color: var(--text-secondary); }
 				.wish-card .purchase-links a { color: var(--accent-color); margin-left: 0.25rem; }
 				.wish-card .reserve-form { display: flex; gap: 0.5rem; }
-				.wish-card select, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); }
+				.wish-card select, .wish-card input, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); }
+				.wish-card input[type="number"] { width: 5.5rem; }
 				.wish-card button { background: var(--accent-color); color: white; border: none; cursor: pointer; }
 				.wish-card button:hover { background: var(--accent-hover); }
 				.wish-card.fully-reserved { opacity: 0.7; }
@@ -127,6 +145,8 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 				.filter-chip { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--border-color); background: var(--chip-bg); color: var(--text-muted); transition: all 0.15s; text-decoration: none; }
 				.filter-chip:hover { background: var(--chip-hover); border-color: var(--border-hover); }
 				.filter-chip.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
+				#error-banner { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 6px; background: #b3261e; color: #fff; }
+				#error-banner[hidden] { display: none; }
 				.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--footer-border); text-align: center; }
 				.footer-row { display: flex; justify-content: center; gap: 1rem; margin-bottom: 0.75rem; }
 				.footer-row:last-child { margin-bottom: 0; }
@@ -138,6 +158,17 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 		<body>
 			<div class="container">
 				<h1>{ i18n.T(lang, "page_title") }</h1>
+				// htmx drops the body of a non-2xx response, so every refusal the
+				// server explains lands here instead of being swapped into a card.
+				// The script cannot reach i18n, so the strings it needs when the
+				// response carries none of its own are rendered here.
+				<div
+					id="error-banner"
+					role="alert"
+					data-fallback={ i18n.T(lang, "err_no_response") }
+					data-refresh={ refreshURL(lang, activeTag) }
+					hidden
+				></div>
 				<div id="wish-content">
 					@WishContent(wishes, allTags, activeTag, lang)
 				</div>
@@ -155,6 +186,76 @@ templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, 
 				</footer>
 			</div>
 			<script>
+				(function() {
+					let hideTimer;
+					function banner() {
+						return document.getElementById('error-banner');
+					}
+					function show(text) {
+						const el = banner();
+						if (!el) {
+							return;
+						}
+						// A dropped or timed-out request carries no body, and those are
+						// exactly the cases where saying nothing looks like a dead button.
+						const message = (text || '').trim() || el.dataset.fallback || '';
+						if (!message) {
+							return;
+						}
+						// Unhide before writing: a live region mutated inside a hidden
+						// subtree is not announced.
+						el.hidden = false;
+						el.textContent = message;
+						// The form may sit far down the grid, and an unread message
+						// above the fold is a silent failure of its own.
+						el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+						clearTimeout(hideTimer);
+						hideTimer = setTimeout(function() { el.hidden = true; }, 6000);
+					}
+					document.addEventListener('htmx:afterRequest', function(evt) {
+						// A refusal followed by a success would otherwise leave the
+						// old message hanging over the card that just worked.
+						if (!evt.detail.successful) {
+							return;
+						}
+						const el = banner();
+						if (!el) {
+							return;
+						}
+						// The 409 handler below issues its own refresh, which also
+						// succeeds. Keyed on the path rather than a flag so the failed
+						// POST's own afterRequest cannot consume the signal first: that
+						// refresh must not clear the message that triggered it.
+						const cfg = evt.detail.requestConfig;
+						if (cfg && cfg.path === el.dataset.refresh) {
+							return;
+						}
+						el.hidden = true;
+						clearTimeout(hideTimer);
+					});
+					document.addEventListener('htmx:responseError', function(evt) {
+						// The server's own refusals are text/plain. A gateway between
+						// it and the visitor answers a 502 with an HTML error page, and
+						// that must not land in the banner as markup shown as text, so
+						// anything else falls back to the generic message.
+						const xhr = evt.detail.xhr;
+						const contentType = xhr.getResponseHeader('Content-Type') || '';
+						show(contentType.indexOf('text/plain') === 0 ? xhr.responseText : '');
+						// A 409 means the wish moved on without this page: the card is
+						// still offering a form that cannot succeed, so replace it with
+						// what the server now has.
+						const el = banner();
+						if (evt.detail.xhr.status === 409 && el && el.dataset.refresh) {
+							htmx.ajax('GET', el.dataset.refresh, '#wish-content');
+						}
+					});
+					document.addEventListener('htmx:sendError', function() {
+						show('');
+					});
+					document.addEventListener('htmx:timeout', function() {
+						show('');
+					});
+				})();
 				function setTheme(theme) {
 					localStorage.setItem('theme', theme);
 					updateTheme();
