@@ -357,7 +357,7 @@ func TestNewWebServer_MapsFlagsOntoTheServer(t *testing.T) {
 			WithObjects(wishes...).
 			Build()
 
-		return newWebServer(fakeClient, opts).Handler()
+		return newWebServer(fakeClient, fakeClient, opts).Handler()
 	}
 
 	t.Run("hop count and burst are not transposed", func(t *testing.T) {

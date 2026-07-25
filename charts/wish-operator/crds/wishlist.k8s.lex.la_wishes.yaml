@@ -75,7 +75,13 @@ spec:
                 description: |-
                   Quantity is the total number of items available for this wish.
                   Defaults to 1 if not specified (backwards compatible).
-                  Set to 0 for unlimited quantity (users can reserve as many as they want).
+                  Set to 0 for unlimited quantity, meaning no stock to run out.
+
+                  Every wish, whatever its quantity, holds at most 100 live reservations
+                  at a time and refuses further ones until some expire. A single
+                  reservation is bounded by whatever stock is left, so a wish with 500
+                  items can be reserved 500 at once; on an unlimited wish, where nothing
+                  is left to run out, one reservation claims at most 100 items.
                 format: int32
                 minimum: 0
                 type: integer

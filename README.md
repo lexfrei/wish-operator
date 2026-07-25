@@ -131,6 +131,12 @@ spec:
 | `reservations` | List of active reservations (quantity, createdAt, expiresAt) |
 | `conditions` | Declared on the type; the controller does not populate it yet |
 
+### Reservation limits
+
+Reserving is anonymous, so two limits are fixed in the operator rather than exposed as configuration. A wish holds at most 100 live reservations; past that it answers 409 until some expire, and the page stops offering the form. A single reservation claims at most 100 items on a wish with unlimited quantity, where nothing else bounds the request. A wish with a declared quantity is bounded by that quantity instead, however large it is.
+
+These limits keep a wish repairable, not unabusable. What they prevent is the terminal case: an object that grows past what the API server accepts, after which nothing can update it again, including the controller pass that prunes expired reservations. What they do not prevent is one client taking all 100 slots and holding them, because a reservation runs for up to eight weeks and carries no identity at all. The wish then shows "cannot take any more reservations" until they expire, and nothing distinguishes the client that did it from a hundred genuine visitors. Treat the reservation limits as a bound on the damage, not as access control: if a wishlist is public and contested, put it behind something that authenticates.
+
 ## Configuration
 
 ### Helm Values

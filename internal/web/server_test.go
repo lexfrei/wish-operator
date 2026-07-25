@@ -5,24 +5,34 @@ package web
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
 
 	"golang.org/x/time/rate"
 )
@@ -48,7 +58,30 @@ const (
 	testDirectRemoteAddr   = testDirectIP + ":5000"
 	testUnsplittableAddr   = "not-a-host-port"
 	testExpiredResName     = "expired-reservation-wish"
+	testConflictName       = "conflict-wish"
+	testRaceName           = "race-wish"
+	testExhaustedName      = "exhausted-wish"
+	testStaleName          = "stale-wish"
+	testExpiredName        = "expired-wish"
+	testReadErrorName      = "read-error-wish"
+	testQuantityName       = "quantity-wish"
+	testNotANumber         = "abc"
+	testTTLName            = "ttl-wish"
+	testUpdateFailName     = "update-fail-wish"
+	testDeletedName        = "deleted-wish"
+	testCapName            = "cap-wish"
+	testCapQuantityName    = "cap-quantity-wish"
+	testLargeStockName     = "large-stock-wish"
+	testCountCapName       = "count-cap-wish"
+	testOfferName          = "offer-wish"
+	testNeverReconciled    = "never-reconciled-wish"
+	testHugeStockName      = "huge-stock-wish"
+	testNoStepsName        = "no-steps-wish"
+	testTagFilter          = "electronics"
 )
+
+// errObjectModified is the cause carried by the simulated conflict responses.
+var errObjectModified = errors.New("the object has been modified")
 
 // newTestServer builds a server with the shipped default hop count, so tests
 // that do not care about proxies exercise the configuration the chart produces.
@@ -56,10 +89,42 @@ const (
 func newTestServer(t *testing.T, wishes ...*wishlistv1alpha1.Wish) *Server {
 	t.Helper()
 
-	return newTestServerWithHops(t, 0, wishes...)
+	return newTestServerFrom(t, 0, interceptor.Funcs{}, wishes...)
 }
 
+// newTestServerWithHops sets the trusted-proxy hop count for proxy-header tests.
 func newTestServerWithHops(t *testing.T, hops int, wishes ...*wishlistv1alpha1.Wish) *Server {
+	t.Helper()
+
+	return newTestServerFrom(t, hops, interceptor.Funcs{}, wishes...)
+}
+
+// newTestServerWithInterceptor installs fake-client interceptors for the
+// conflict and error-path tests.
+func newTestServerWithInterceptor(
+	t *testing.T,
+	funcs interceptor.Funcs,
+	wishes ...*wishlistv1alpha1.Wish,
+) *Server {
+	t.Helper()
+
+	return newTestServerFrom(t, 0, funcs, wishes...)
+}
+
+func newTestServerFrom(
+	t *testing.T,
+	hops int,
+	funcs interceptor.Funcs,
+	wishes ...*wishlistv1alpha1.Wish,
+) *Server {
+	t.Helper()
+
+	fakeClient := newFakeClient(t, funcs, wishes...)
+
+	return NewServer(fakeClient, fakeClient, testNamespace, hops, 30, 10)
+}
+
+func newFakeClient(t *testing.T, funcs interceptor.Funcs, wishes ...*wishlistv1alpha1.Wish) client.WithWatch {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -71,13 +136,80 @@ func newTestServerWithHops(t *testing.T, hops int, wishes ...*wishlistv1alpha1.W
 		objs[i] = w
 	}
 
-	fakeClient := fake.NewClientBuilder().
+	return fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
 		WithStatusSubresource(objs...).
+		WithInterceptorFuncs(funcs).
 		Build()
+}
 
-	return NewServer(fakeClient, testNamespace, hops, 30, 10)
+// wishGroupResource identifies the CRD in synthetic API errors.
+func wishGroupResource() schema.GroupResource {
+	return schema.GroupResource{Group: "wishlist.k8s.lex.la", Resource: "wishes"}
+}
+
+// conflictError builds an apierrors Conflict for a wish, the retryable outcome
+// that a reservation must transparently recover from.
+func conflictError(name string) error {
+	return apierrors.NewConflict(wishGroupResource(), name, errObjectModified)
+}
+
+// reservableWish builds an active wish with the given stock, ready to reserve.
+func reservableWish(name string, quantity int32) *wishlistv1alpha1.Wish {
+	return &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: testNamespace,
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    testTitleGift,
+			Quantity: quantity,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+		},
+	}
+}
+
+// reserveRequest builds a reservation POST for the named wish.
+func reserveRequest(name, weeks, quantity string) *http.Request {
+	form := url.Values{}
+	form.Set("weeks", weeks)
+	form.Set("quantity", quantity)
+
+	req := httptest.NewRequest(http.MethodPost, "/wishes/"+name+"/reserve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	return req
+}
+
+// cardHTML returns just the named wish's card out of a rendered page. It cuts
+// at card ids rather than at closing tags, so it survives changes to the card's
+// internal markup and fails loudly if the card is missing altogether.
+func cardHTML(t *testing.T, page, name string) string {
+	t.Helper()
+
+	start := strings.Index(page, `id="wish-`+name+`"`)
+	require.GreaterOrEqual(t, start, 0, "no card for wish %q on the page", name)
+
+	card := page[start:]
+	if next := strings.Index(card[1:], `id="wish-`); next >= 0 {
+		card = card[:next+1]
+	}
+
+	return card
+}
+
+// getWish reads a wish back from the server's client.
+func getWish(t *testing.T, srv *Server, name string) *wishlistv1alpha1.Wish {
+	t.Helper()
+
+	wish := &wishlistv1alpha1.Wish{}
+	err := srv.client.Get(context.Background(), client.ObjectKey{Name: name, Namespace: testNamespace}, wish)
+	require.NoError(t, err)
+
+	return wish
 }
 
 func TestServer_HandleIndex(t *testing.T) {
@@ -484,6 +616,10 @@ func TestServer_HandleReserve_QuantityExceedsAvailable(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	// The message has to name how many are actually left.
+	assert.Contains(t, rec.Body.String(),
+		fmt.Sprintf(i18n.T(i18n.DefaultLang, "err_quantity_exceeds"), 2))
 }
 
 func TestServer_HandleReserve_InvalidWeeks(t *testing.T) {
@@ -497,7 +633,7 @@ func TestServer_HandleReserve_InvalidWeeks(t *testing.T) {
 		{"zero weeks", "0", http.StatusBadRequest},
 		{"negative weeks", "-1", http.StatusBadRequest},
 		{"too many weeks", "9", http.StatusBadRequest},
-		{"non-numeric", "abc", http.StatusBadRequest},
+		{"non-numeric", testNotANumber, http.StatusBadRequest},
 	}
 
 	for _, tt := range tests {
@@ -1329,4 +1465,661 @@ func TestServer_LimiterCapKeepsTheServedEntry(t *testing.T) {
 
 		assert.LessOrEqual(t, len(srv.limiters), limiterMaxEntries)
 	})
+}
+
+func TestServer_HandleReserve_RetriesOnConflict(t *testing.T) {
+	t.Parallel()
+
+	var updates atomic.Int32
+
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(
+			ctx context.Context,
+			cl client.Client,
+			_ string,
+			obj client.Object,
+			opts ...client.SubResourceUpdateOption,
+		) error {
+			if updates.Add(1) == 1 {
+				return conflictError(testConflictName)
+			}
+
+			return cl.Status().Update(ctx, obj, opts...)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testConflictName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testConflictName, "4", "2"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int32(2), updates.Load(), "the update should be retried exactly once")
+
+	// The retry must not duplicate the reservation.
+	updated := getWish(t, srv, testConflictName)
+	require.Len(t, updated.Status.Reservations, 1)
+	assert.Equal(t, int32(2), updated.Status.Reservations[0].Quantity)
+}
+
+func TestServer_HandleReserve_ConflictThenFullyReserved(t *testing.T) {
+	t.Parallel()
+
+	var updates atomic.Int32
+
+	// The first update loses the race to a visitor who takes the whole stock,
+	// so the retry has to re-validate against the refreshed wish.
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(
+			ctx context.Context,
+			cl client.Client,
+			_ string,
+			obj client.Object,
+			opts ...client.SubResourceUpdateOption,
+		) error {
+			if updates.Add(1) > 1 {
+				return cl.Status().Update(ctx, obj, opts...)
+			}
+
+			current := &wishlistv1alpha1.Wish{}
+			if err := cl.Get(ctx,
+				client.ObjectKey{Name: testRaceName, Namespace: testNamespace},
+				current); err != nil {
+				return err
+			}
+
+			now := metav1.Now()
+			current.Status.Reservations = append(current.Status.Reservations, wishlistv1alpha1.Reservation{
+				Quantity:  2,
+				CreatedAt: now,
+				ExpiresAt: metav1.NewTime(now.Add(7 * 24 * time.Hour)),
+			})
+
+			if err := cl.Status().Update(ctx, current); err != nil {
+				return err
+			}
+
+			return conflictError(testRaceName)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testRaceName, 2))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testRaceName, "4", "2"))
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, int32(1), updates.Load(), "the retry must abort before updating again")
+
+	// Only the competing reservation survives.
+	updated := getWish(t, srv, testRaceName)
+	require.Len(t, updated.Status.Reservations, 1)
+	assert.Equal(t, int32(2), updated.Status.Reservations[0].Quantity)
+}
+
+func TestServer_HandleReserve_ConflictRetriesExhausted(t *testing.T) {
+	t.Parallel()
+
+	var updates atomic.Int32
+
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(
+			_ context.Context,
+			_ client.Client,
+			_ string,
+			_ client.Object,
+			_ ...client.SubResourceUpdateOption,
+		) error {
+			updates.Add(1)
+
+			return conflictError(testExhaustedName)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testExhaustedName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testExhaustedName, "4", "1"))
+
+	// Contention is not a broken server, so the visitor is told to come back.
+	// The status code and the header say that to a machine; the body is the
+	// only part a person reads, so it must not be the failure message.
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
+	assert.Contains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_reserve_busy"))
+	assert.NotContains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_reserve_failed"))
+	assert.Greater(t, updates.Load(), int32(1), "the update should be retried before giving up")
+	assert.Empty(t, getWish(t, srv, testExhaustedName).Status.Reservations)
+}
+
+func TestServer_HandleReserve_ReadsThroughUncachedReader(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+
+	// What the informer cache still holds: the wish is fully reserved.
+	stale := reservableWish(testStaleName, 1)
+	stale.Status.Reservations = []wishlistv1alpha1.Reservation{
+		{
+			Quantity:  1,
+			CreatedAt: now,
+			ExpiresAt: metav1.NewTime(now.Add(7 * 24 * time.Hour)),
+		},
+	}
+
+	// What the API server holds: the reservation is gone, the item is free.
+	fresh := reservableWish(testStaleName, 1)
+
+	cached := newFakeClient(t, interceptor.Funcs{}, stale)
+	live := newFakeClient(t, interceptor.Funcs{}, fresh)
+	srv := NewServer(cached, live, testNamespace, 0, 30, 10)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, reserveRequest(testStaleName, "4", "1"))
+
+	// A cached read would answer 409 on the stale copy.
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestServer_HandleReserve_DoesNotRePersistExpiredReservations(t *testing.T) {
+	t.Parallel()
+
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+
+	// One reservation has expired, one is live, and the controller has pruned
+	// neither yet. Whether the expired one still blocks is a question for the
+	// availability math; this test is only about what gets written back.
+	wish := reservableWish(testExpiredName, 3)
+	wish.Status.Reservations = []wishlistv1alpha1.Reservation{
+		{
+			Quantity:  1,
+			CreatedAt: metav1.NewTime(past.Add(-time.Hour)),
+			ExpiresAt: past,
+		},
+		{
+			Quantity:  1,
+			CreatedAt: metav1.NewTime(past.Add(-time.Hour)),
+			ExpiresAt: future,
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testExpiredName, "4", "1"))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// Writing the new reservation must not re-persist the expired one.
+	stored := getWish(t, srv, testExpiredName).Status.Reservations
+	require.Len(t, stored, 2)
+
+	for _, res := range stored {
+		assert.True(t, res.ExpiresAt.After(time.Now()), "expired reservation was written back")
+	}
+}
+
+func TestServer_HandleReserve_ReservationCountCapped(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	expires := metav1.NewTime(now.Add(7 * 24 * time.Hour))
+
+	// An unlimited wish has no availability ceiling of its own, so without a cap
+	// an anonymous POST loop grows this object until the API server refuses it.
+	wish := reservableWish(testCapName, 0)
+	wish.Status.Reservations = make([]wishlistv1alpha1.Reservation, wishlistv1alpha1.MaxReservations)
+
+	for i := range wish.Status.Reservations {
+		wish.Status.Reservations[i] = wishlistv1alpha1.Reservation{
+			Quantity:  1,
+			CreatedAt: now,
+			ExpiresAt: expires,
+		}
+	}
+
+	srv := newTestServer(t, wish)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testCapName, "4", "1"))
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Len(t, getWish(t, srv, testCapName).Status.Reservations, wishlistv1alpha1.MaxReservations)
+}
+
+func TestServer_HandleReserve_LargeStockNotCapped(t *testing.T) {
+	t.Parallel()
+
+	// A wish with declared stock is bounded by that stock, not by the limit that
+	// exists for unlimited ones: asking for 200 of 500 has to work. What the
+	// card offers for such a wish is pinned separately, by the page-size test.
+	const (
+		stock  = 500
+		wanted = 200
+	)
+
+	srv := newTestServer(t, reservableWish(testLargeStockName, stock))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testLargeStockName, "4", strconv.Itoa(wanted)))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	stored := getWish(t, srv, testLargeStockName).Status.Reservations
+	require.Len(t, stored, 1)
+	assert.Equal(t, int32(wanted), stored[0].Quantity)
+}
+
+func TestServer_HandleReserve_CountCapWithStockLeft(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	expires := metav1.NewTime(now.Add(7 * 24 * time.Hour))
+
+	// Stock left, but no room for another entry. That is a different refusal
+	// from "everything is taken", and the card must not offer a form for it.
+	wish := reservableWish(testCountCapName, 1000)
+	wish.Status.Reservations = make([]wishlistv1alpha1.Reservation, wishlistv1alpha1.MaxReservations)
+
+	for i := range wish.Status.Reservations {
+		wish.Status.Reservations[i] = wishlistv1alpha1.Reservation{
+			Quantity:  1,
+			CreatedAt: now,
+			ExpiresAt: expires,
+		}
+	}
+
+	srv := newTestServer(t, wish)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testCountCapName, "4", "1"))
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_reservation_limit"))
+	assert.NotContains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_fully_reserved"))
+
+	// The page must agree: no reserve form for a wish that cannot take one, and
+	// it must not claim the stock is gone when 900 of 1000 are still free.
+	page := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, page.Code)
+	// Scoped to this wish's card: the page may grow other forms later.
+	assert.NotContains(t, cardHTML(t, page.Body.String(), testCountCapName), "<form")
+	assert.Contains(t, page.Body.String(), i18n.T(i18n.DefaultLang, "err_reservation_limit"))
+	assert.NotContains(t, page.Body.String(), i18n.T(i18n.DefaultLang, "err_fully_reserved"))
+}
+
+func TestServer_HandleIndex_OffersOnlyWhatTheServerAccepts(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t, reservableWish(testOfferName, 0))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// An unlimited wish gets a number input, and it must stop where the server
+	// stops rather than inviting a value that comes back as 400.
+	assert.Contains(t, rec.Body.String(),
+		fmt.Sprintf("max=\"%d\"", wishlistv1alpha1.MaxQuantityPerRequest))
+}
+
+func TestServer_HandleIndex_LargeStockStaysSmall(t *testing.T) {
+	t.Parallel()
+
+	// spec.quantity has no upper bound in the schema, so one <option> per item
+	// turns a typo into a multi-megabyte page served to anonymous visitors.
+	const stock = 20000
+
+	srv := newTestServer(t, reservableWish(testHugeStockName, stock))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+
+	// Only the reservation-length options may appear; the item list is gone.
+	assert.LessOrEqual(t, strings.Count(body, "<option"), maxWeeks)
+	assert.Contains(t, body, fmt.Sprintf("max=\"%d\"", stock))
+}
+
+func TestCardHTML_IsolatesOneCard(t *testing.T) {
+	t.Parallel()
+
+	// Two cards on one page, and the form-less one must sort first, so that
+	// cutting at the next card is what excludes the other card's form. If it
+	// sorted last the helper could return the whole tail and still pass.
+	// listWishes sorts by priority descending, then title ascending.
+	full := reservableWish(testOfferName, 3)
+	full.Spec.Title = "B gift with a form"
+
+	empty := reservableWish(testCountCapName, 1)
+	empty.Spec.Title = "A gift without a form"
+	empty.Status.Reservations = []wishlistv1alpha1.Reservation{
+		{
+			Quantity:  1,
+			CreatedAt: metav1.Now(),
+			ExpiresAt: metav1.NewTime(time.Now().Add(time.Hour)),
+		},
+	}
+
+	srv := newTestServer(t, full, empty)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// The reservable wish has a form, the fully reserved one does not, and
+	// neither card may carry the other's markup.
+	assert.Contains(t, cardHTML(t, rec.Body.String(), testOfferName), "<form")
+	assert.NotContains(t, cardHTML(t, rec.Body.String(), testCountCapName), "<form")
+}
+
+func TestServer_HandleIndex_QuantityInputIsStyled(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t, reservableWish(testOfferName, 5))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	require.Contains(t, body, `type="number"`)
+
+	// The quantity control used to be a select, which the card's rule covers.
+	// As an input it needs the same rule, or it renders unstyled: a light box
+	// with dark text inside a dark card, at a different height from the weeks
+	// select beside it.
+	styled := regexp.MustCompile(`\.wish-card select,[^{]*\.wish-card input[^{]*\{`)
+	assert.Regexp(t, styled, body)
+}
+
+func TestServer_HandleIndex_ShowsErrorResponses(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t, reservableWish(testOfferName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// htmx does not swap the body of a non-2xx response, so without somewhere to
+	// put it every refusal the server explains is discarded by the browser.
+	body := rec.Body.String()
+	assert.Contains(t, body, `id="error-banner"`)
+	assert.Contains(t, body, "htmx:responseError")
+
+	// A dropped or timed-out request produces no response at all, which is the
+	// same dead-button experience the banner exists to remove.
+	assert.Contains(t, body, "htmx:sendError")
+	assert.Contains(t, body, "htmx:timeout")
+
+	// Those carry no body, so the message they show has to come from here.
+	assert.Contains(t, body, i18n.T(i18n.DefaultLang, "err_no_response"))
+
+	// And a 409 means the card is offering a form that cannot succeed any
+	// more, so the page has to be told where to get the current state.
+	assert.Contains(t, body, `data-refresh="/wishes?lang=`+i18n.DefaultLang+`"`)
+	assert.Contains(t, body, "htmx.ajax('GET'")
+
+	// The refresh the 409 issues is itself a success, so the banner-clearing
+	// handler must skip it by matching its path, or the message it just showed
+	// vanishes at once. Pinned at the markup level; there is no JS test rig.
+	assert.Contains(t, body, "el.dataset.refresh")
+	assert.Contains(t, body, "requestConfig")
+}
+
+func TestServer_HandleIndex_RefreshKeepsTheTagFilter(t *testing.T) {
+	t.Parallel()
+
+	wish := reservableWish(testOfferName, 3)
+	wish.Spec.Tags = []string{testTagFilter}
+
+	srv := newTestServer(t, wish)
+
+	// Filtered: the 409 refresh must reload the same filtered list, not reset
+	// the page to "All". Asserted on the data-refresh attribute rather than the
+	// page, since the filter bar renders tag= links for every tag regardless.
+	filtered := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(filtered, httptest.NewRequest(http.MethodGet, "/?tag="+testTagFilter, nil))
+	assert.Equal(t, http.StatusOK, filtered.Code)
+	assert.Contains(t, filtered.Body.String(),
+		`data-refresh="/wishes?lang=`+i18n.DefaultLang+`&amp;tag=`+testTagFilter+`"`)
+
+	// Unfiltered: no tag to carry, so the refresh URL has none.
+	all := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(all, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, all.Code)
+	assert.Contains(t, all.Body.String(), `data-refresh="/wishes?lang=`+i18n.DefaultLang+`"`)
+	assert.NotContains(t, all.Body.String(), `data-refresh="/wishes?lang=`+i18n.DefaultLang+`&amp;tag=`)
+}
+
+func TestServer_HandleReserve_QuantityCapped(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity string
+		expected int
+	}{
+		{"at the cap", strconv.Itoa(wishlistv1alpha1.MaxQuantityPerRequest), http.StatusOK},
+		{"above the cap", strconv.Itoa(wishlistv1alpha1.MaxQuantityPerRequest + 1), http.StatusBadRequest},
+		{"int32 ceiling", strconv.Itoa(math.MaxInt32), http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Unlimited: nothing but the cap stands between the request and the
+			// number it asked for.
+			srv := newTestServer(t, reservableWish(testCapQuantityName, 0))
+			rec := httptest.NewRecorder()
+
+			srv.Handler().ServeHTTP(rec, reserveRequest(testCapQuantityName, "4", tt.quantity))
+
+			assert.Equal(t, tt.expected, rec.Code)
+
+			if tt.expected != http.StatusBadRequest {
+				return
+			}
+
+			// The card for this wish says "Available: unlimited", so the refusal
+			// must talk about the per-reservation limit rather than claim only a
+			// hundred exist.
+			assert.Contains(t, rec.Body.String(),
+				fmt.Sprintf(i18n.T(i18n.DefaultLang, "err_quantity_per_request"),
+					wishlistv1alpha1.MaxQuantityPerRequest))
+			assert.NotContains(t, rec.Body.String(),
+				fmt.Sprintf(i18n.T(i18n.DefaultLang, "err_quantity_exceeds"),
+					wishlistv1alpha1.MaxQuantityPerRequest))
+		})
+	}
+}
+
+func TestServer_Reserve_BackoffThatNeverRuns(t *testing.T) {
+	t.Parallel()
+
+	srv := newTestServer(t, reservableWish(testNoStepsName, 3))
+
+	// RetryOnConflict with no steps never calls the closure and reports no
+	// error, which would hand the handler a nil wish to render.
+	srv.backoff = wait.Backoff{}
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, reserveRequest(testNoStepsName, "4", "1"))
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, getWish(t, srv, testNoStepsName).Status.Reservations)
+}
+
+func TestServer_ListingAndReserveAgreeOnTTL(t *testing.T) {
+	t.Parallel()
+
+	// Status.Active is written by the controller, so it lags reality in both
+	// directions. The page and the reserve path must not disagree while it
+	// catches up: what is listed is reservable, what is refused is not listed.
+	tests := []struct {
+		name   string
+		age    time.Duration
+		ttl    time.Duration
+		active bool
+		listed bool
+	}{
+		{"never reconciled", time.Minute, time.Hour, false, true},
+		{"expired but not yet reconciled", 2 * time.Hour, time.Hour, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			wish := reservableWish(testNeverReconciled, 3)
+			wish.CreationTimestamp = metav1.NewTime(time.Now().Add(-tt.age))
+			wish.Spec.TTL = &metav1.Duration{Duration: tt.ttl}
+			wish.Status.Active = tt.active
+
+			srv := newTestServer(t, wish)
+
+			page := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			listed := strings.Contains(page.Body.String(), testNeverReconciled)
+			assert.Equal(t, tt.listed, listed, "listing")
+
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, reserveRequest(testNeverReconciled, "4", "1"))
+
+			// One expectation, one agreement check: reservability is not an
+			// independent axis, it is whatever the listing says.
+			assert.Equal(t, listed, rec.Code == http.StatusOK, "listing and reserve must agree")
+		})
+	}
+}
+
+func TestServer_HandleReserve_ExpiredWish(t *testing.T) {
+	t.Parallel()
+
+	// The TTL ran out an hour ago, so listWishes no longer shows this wish.
+	// A POST straight at its name must not get a reservation either.
+	wish := reservableWish(testTTLName, 3)
+	wish.CreationTimestamp = metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	wish.Spec.TTL = &metav1.Duration{Duration: time.Hour}
+
+	srv := newTestServer(t, wish)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testTTLName, "4", "1"))
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, getWish(t, srv, testTTLName).Status.Reservations)
+}
+
+func TestServer_HandleReserve_UpdateFails(t *testing.T) {
+	t.Parallel()
+
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(
+			_ context.Context,
+			_ client.Client,
+			_ string,
+			_ client.Object,
+			_ ...client.SubResourceUpdateOption,
+		) error {
+			return apierrors.NewInternalError(errObjectModified)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testUpdateFailName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testUpdateFailName, "4", "1"))
+
+	// A write failure that is not a conflict is a server error, not a retry hint.
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Empty(t, rec.Header().Get("Retry-After"))
+	assert.Contains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_reserve_failed"))
+}
+
+func TestServer_HandleReserve_DeletedDuringUpdate(t *testing.T) {
+	t.Parallel()
+
+	funcs := interceptor.Funcs{
+		SubResourceUpdate: func(
+			_ context.Context,
+			_ client.Client,
+			_ string,
+			_ client.Object,
+			_ ...client.SubResourceUpdateOption,
+		) error {
+			return apierrors.NewNotFound(wishGroupResource(), testDeletedName)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testDeletedName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testDeletedName, "4", "1"))
+
+	// The wish went away between the read and the write.
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestServer_HandleReserve_ReadError(t *testing.T) {
+	t.Parallel()
+
+	funcs := interceptor.Funcs{
+		Get: func(
+			_ context.Context,
+			_ client.WithWatch,
+			_ client.ObjectKey,
+			_ client.Object,
+			_ ...client.GetOption,
+		) error {
+			return apierrors.NewInternalError(errObjectModified)
+		},
+	}
+
+	srv := newTestServerWithInterceptor(t, funcs, reservableWish(testReadErrorName, 3))
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, reserveRequest(testReadErrorName, "4", "1"))
+
+	// A read failure that is not "gone" must not look like a missing wish,
+	// and it must not be reported as a failed write either.
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), i18n.T(i18n.DefaultLang, "err_get_wish"))
+}
+
+func TestServer_HandleReserve_Quantity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity string
+		expected int
+	}{
+		{"empty defaults to one", "", http.StatusOK},
+		{"letters", testNotANumber, http.StatusBadRequest},
+		{"zero", "0", http.StatusBadRequest},
+		{"negative", "-1", http.StatusBadRequest},
+		{"above int32", "99999999999", http.StatusBadRequest},
+		{"fractional", "1.5", http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := newTestServer(t, reservableWish(testQuantityName, 0))
+			rec := httptest.NewRecorder()
+
+			srv.Handler().ServeHTTP(rec, reserveRequest(testQuantityName, "4", tt.quantity))
+
+			assert.Equal(t, tt.expected, rec.Code)
+		})
+	}
 }

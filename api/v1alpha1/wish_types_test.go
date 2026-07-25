@@ -726,3 +726,78 @@ func TestWish_IsFullyReserved_Unlimited(t *testing.T) {
 		})
 	}
 }
+
+func TestWish_MaxReservableQuantity(t *testing.T) {
+	t.Parallel()
+
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	full := make([]Reservation, MaxReservations)
+	for i := range full {
+		full[i] = Reservation{Quantity: 1, ExpiresAt: future}
+	}
+
+	expiredFull := make([]Reservation, MaxReservations)
+	for i := range expiredFull {
+		expiredFull[i] = Reservation{Quantity: 1, ExpiresAt: past}
+	}
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		atLimit      bool
+		expected     int32
+	}{
+		{
+			name:     "unlimited stops at the per-request limit",
+			quantity: 0,
+			expected: MaxQuantityPerRequest,
+		},
+		{
+			name:     "limited reports what is left, above the per-request limit",
+			quantity: 500,
+			expected: 500,
+		},
+		{
+			name:         "limited reports what is left",
+			quantity:     5,
+			reservations: []Reservation{{Quantity: 2, ExpiresAt: future}},
+			expected:     3,
+		},
+		{
+			name:         "at the reservation limit nothing can be reserved",
+			quantity:     1000,
+			reservations: full,
+			atLimit:      true,
+			expected:     0,
+		},
+		{
+			name:         "one below the reservation limit still takes one more",
+			quantity:     1000,
+			reservations: full[:MaxReservations-1],
+			expected:     1000 - (MaxReservations - 1),
+		},
+		{
+			name:         "expired entries do not fill the reservation limit",
+			quantity:     1000,
+			reservations: expiredFull,
+			expected:     1000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			wish := &Wish{
+				Spec:   WishSpec{Quantity: tt.quantity},
+				Status: WishStatus{Reservations: tt.reservations},
+			}
+
+			assert.Equal(t, tt.atLimit, wish.AtReservationLimit())
+			assert.Equal(t, tt.expected, wish.MaxReservableQuantity())
+		})
+	}
+}

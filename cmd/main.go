@@ -93,8 +93,8 @@ var (
 // arguments positionally and two of them are ints, so a transposition compiles
 // and runs; this is the single place that mapping is written down, and the
 // place a test can pin it.
-func newWebServer(c client.Client, opts *webOptions) *web.Server {
-	return web.NewServer(c, opts.namespace, opts.trustedProxyHops, opts.rateLimit, opts.rateBurst)
+func newWebServer(c client.Client, reader client.Reader, opts *webOptions) *web.Server {
+	return web.NewServer(c, reader, opts.namespace, opts.trustedProxyHops, opts.rateLimit, opts.rateBurst)
 }
 
 // validateWebFlags rejects settings the flag package cannot express. Each one
@@ -288,7 +288,8 @@ func main() {
 	}
 
 	// Start web server
-	webServer := newWebServer(mgr.GetClient(), &webOpts)
+	// GetAPIReader bypasses the cache so a reservation retry sees the write it conflicted with.
+	webServer := newWebServer(mgr.GetClient(), mgr.GetAPIReader(), &webOpts)
 	if err := mgr.Add(&webRunnable{addr: webAddr, handler: webServer.Handler()}); err != nil {
 		setupLog.Error(err, "unable to add web server")
 		os.Exit(1)
