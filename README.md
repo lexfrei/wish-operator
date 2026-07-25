@@ -43,6 +43,41 @@ helm install wish-operator oci://ghcr.io/lexfrei/charts/wish-operator \
   --set 'httpRoute.hostnames[0]=wishes.example.com'
 ```
 
+### Upgrading
+
+Reservations used to live in three single-reservation status fields (`reserved`, `reservedAt`, `reservationExpires`). Releases v0.3.0 through v0.4.1 carried a reconcile-time migration that rewrote them into the `reservations` list; those fields and the migration are gone from later releases.
+
+If you are still on v0.0.1 or v0.0.2, go through v0.4.1 first. Jumping straight to a later release skips the migration and drops any reservation still stored in the old format. `helm upgrade` never installs CRDs, only `helm install` does, so every hop below applies the CRD by hand. Which side of the operator it goes on differs, and getting it backwards loses data:
+
+1. Record what is reserved today, before touching anything, expiry included. Keep the output.
+
+    ```bash
+    kubectl get wishes --all-namespaces --output json \
+      | jq -r '.items[] | select(.status.reserved == true) | [.metadata.namespace, .metadata.name, .status.reservationExpires] | @tsv'
+    ```
+
+2. Apply the v0.4.1 CRD **before** upgrading the operator to v0.4.1. The v0.0.x schema has no `reservations` property, and an API server prunes what the schema does not declare on every write. The v0.4.1 operator writes the migrated list and the cleared legacy fields in a single status update, so under the old schema the new list is pruned away while the clearing sticks, and the reservation is gone.
+
+    ```bash
+    kubectl apply --filename https://raw.githubusercontent.com/lexfrei/wish-operator/refs/tags/v0.4.1/charts/wish-operator/crds/wishlist.k8s.lex.la_wishes.yaml
+    ```
+
+3. Upgrade to v0.4.1. Starting it reconciles every Wish once. Check the names from step 1 whose recorded expiry is still in the future — those must now carry a non-empty `reservations` list:
+
+    ```bash
+    kubectl get wish NAME --namespace NAMESPACE --output jsonpath='{.status.reservations}'
+    ```
+
+    Two things that look like failure but are not. An entry whose expiry had already passed is migrated and pruned within the same reconcile, so its list is legitimately empty — that is why step 1 records the expiry, and why only the still-valid ones are worth checking. And do not use the absence of `status.reserved` as the signal either: it goes away whether the reservation migrated or was pruned into nothing.
+
+4. Only once step 3 checks out, upgrade to this release and apply its CRD **after** the operator, substituting the tag you are installing.
+
+    ```bash
+    kubectl apply --filename https://raw.githubusercontent.com/lexfrei/wish-operator/refs/tags/vX.Y.Z/charts/wish-operator/crds/wishlist.k8s.lex.la_wishes.yaml
+    ```
+
+The order flips between step 2 and step 4 because the two schemas differ in kind. The v0.4.1 one adds a property, and the operator needs it in place to have somewhere to write. This release's one removes properties, so it has to wait behind the step 3 check that says the data has moved. Applying it is not destructive by itself; the legacy fields go on the next status write to each object, which may not happen for a while — the controller only writes when something actually changed, so a Wish sitting in steady state keeps them in etcd, inert, until it next needs updating.
+
 ## Usage
 
 ### Create a Wish
@@ -94,8 +129,7 @@ spec:
 |-------|-------------|
 | `active` | Whether wish is within TTL |
 | `reservations` | List of active reservations (quantity, createdAt, expiresAt) |
-| `conditions` | Reserved for future use; nothing writes it yet, so do not wait on it |
-| `reserved`, `reservedAt`, `reservationExpires` | Deprecated single-reservation fields, superseded by `reservations` |
+| `conditions` | Declared on the type; the controller does not populate it yet |
 
 ## Configuration
 
@@ -137,6 +171,7 @@ Set it too low and every visitor collapses onto the address of a proxy in the ch
 - kubectl
 - Helm 3
 - [helm-unittest](https://github.com/helm-unittest/helm-unittest)
+- envtest binaries for the controller suite, installed by `make setup-envtest`
 
 ### Build
 
@@ -146,8 +181,10 @@ make build
 
 ### Test
 
+The controller suite runs against envtest, so it needs the control-plane binaries: run `make setup-envtest` once and the suite finds them under `bin/k8s` on its own. Use `make test` rather than invoking the Go test command across all packages directly, which also pulls in `test/e2e` and fails there for want of a Kind cluster.
+
 ```bash
-# Go tests (fetches the envtest control-plane binaries first)
+# Go tests
 make test
 
 # Helm tests

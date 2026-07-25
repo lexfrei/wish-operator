@@ -12,16 +12,12 @@ const (
 	keyEmptyFiltered      = "empty_filtered"
 	keyEmptyDefault       = "empty_default"
 	keyBuyLabel           = "buy_label"
-	keyReservedBadge      = "reserved_badge"
-	keyReservedUntil      = "reserved_until"
 	keyReserveBtn         = "reserve_btn"
 	keyWeeksFormat        = "weeks_format"
 	keyWeekOne            = "week_one"
 	keyWeeksFew           = "weeks_few"
 	keyWeeksMany          = "weeks_many"
-	keyQuantityLabel      = "quantity_label"
 	keyAvailableLabel     = "available_label"
-	keyUnlimitedLabel     = "unlimited_label"
 	keyUnlimitedAvailable = "unlimited_available"
 	keyReservedCount      = "reserved_count"
 
@@ -32,7 +28,6 @@ const (
 	keyErrWeeksRange      = "err_weeks_range"
 	keyErrNotFound        = "err_not_found"
 	keyErrGetWish         = "err_get_wish"
-	keyErrAlreadyReserved = "err_already_reserved"
 	keyErrReserveFailed   = "err_reserve_failed"
 	keyErrRateLimit       = "err_rate_limit"
 	keyErrInvalidQuantity = "err_invalid_quantity"
@@ -56,14 +51,10 @@ var messages = map[string]map[string]string{
 		keyEmptyFiltered:      "No wishes with tag",
 		keyEmptyDefault:       "No wishes yet.",
 		keyBuyLabel:           "Buy:",
-		keyReservedBadge:      "Reserved",
-		keyReservedUntil:      "until %s",
 		keyReserveBtn:         "Reserve",
 		keyWeeksFormat:        "weeks",
 		keyWeekOne:            "week",
-		keyQuantityLabel:      "Qty:",
 		keyAvailableLabel:     "Available:",
-		keyUnlimitedLabel:     "Unlimited",
 		keyUnlimitedAvailable: "Available: ∞",
 		keyReservedCount:      "%d reserved until %s",
 
@@ -75,7 +66,6 @@ var messages = map[string]map[string]string{
 		keyErrWeeksRange:      "Weeks must be between %d and %d",
 		keyErrNotFound:        "Wish not found",
 		keyErrGetWish:         "Failed to get wish",
-		keyErrAlreadyReserved: "Wish is already reserved",
 		keyErrReserveFailed:   "Failed to reserve wish",
 		keyErrRateLimit:       "Too many requests",
 		keyErrInvalidQuantity: "Invalid quantity",
@@ -90,16 +80,12 @@ var messages = map[string]map[string]string{
 		keyEmptyFiltered:      "Нет желаний с тегом",
 		keyEmptyDefault:       "Пока нет желаний.",
 		keyBuyLabel:           "Купить:",
-		keyReservedBadge:      "Зарезервировано",
-		keyReservedUntil:      "до %s",
 		keyReserveBtn:         "Зарезервировать",
 		keyWeekOne:            "неделя",
 		keyWeeksFew:           "недели",
 		keyWeeksMany:          ruWeeksMany,
 		keyWeeksFormat:        ruWeeksMany,
-		keyQuantityLabel:      "Кол-во:",
 		keyAvailableLabel:     "Доступно:",
-		keyUnlimitedLabel:     "Неограничено",
 		keyUnlimitedAvailable: "Доступно: ∞",
 		keyReservedCount:      "%d зарезервировано до %s",
 
@@ -111,7 +97,6 @@ var messages = map[string]map[string]string{
 		keyErrWeeksRange:      "Срок должен быть от %d до %d недель",
 		keyErrNotFound:        "Желание не найдено",
 		keyErrGetWish:         "Не удалось получить желание",
-		keyErrAlreadyReserved: "Уже зарезервировано",
 		keyErrReserveFailed:   "Не удалось зарезервировать",
 		keyErrRateLimit:       "Слишком много запросов",
 		keyErrInvalidQuantity: "Неверное количество",
@@ -126,14 +111,10 @@ var messages = map[string]map[string]string{
 		keyEmptyFiltered:      "没有带有此标签的愿望",
 		keyEmptyDefault:       "暂无愿望",
 		keyBuyLabel:           "购买：",
-		keyReservedBadge:      "已预订",
-		keyReservedUntil:      "至 %s",
 		keyReserveBtn:         "预订",
 		keyWeeksFormat:        "周",
 		keyWeekOne:            "周",
-		keyQuantityLabel:      "数量：",
 		keyAvailableLabel:     "可用：",
-		keyUnlimitedLabel:     "无限",
 		keyUnlimitedAvailable: "可用：∞",
 		keyReservedCount:      "%d 已预订至 %s",
 
@@ -145,7 +126,6 @@ var messages = map[string]map[string]string{
 		keyErrWeeksRange:      "周数必须在%d到%d之间",
 		keyErrNotFound:        "未找到愿望",
 		keyErrGetWish:         "获取愿望失败",
-		keyErrAlreadyReserved: "已被预订",
 		keyErrReserveFailed:   "预订失败",
 		keyErrRateLimit:       "请求过多",
 		keyErrInvalidQuantity: "数量无效",
