@@ -160,13 +160,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              reservationExpires:
-                description: |-
-                  ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
-
-                  Deprecated: Use Reservations slice instead.
-                format: date-time
-                type: string
               reservations:
                 description: Reservations is a list of active reservations for this
                   wish.
@@ -194,19 +187,6 @@ spec:
                   - quantity
                   type: object
                 type: array
-              reserved:
-                description: |-
-                  Reserved indicates if someone has reserved this wish.
-
-                  Deprecated: Use Reservations slice instead.
-                type: boolean
-              reservedAt:
-                description: |-
-                  ReservedAt is the timestamp when the wish was reserved.
-
-                  Deprecated: Use Reservations slice instead.
-                format: date-time
-                type: string
             type: object
         required:
         - spec

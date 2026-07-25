@@ -96,26 +96,6 @@ type WishStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// --- DEPRECATED FIELDS (kept for backwards compatibility during migration) ---
-
-	// Reserved indicates if someone has reserved this wish.
-	//
-	// Deprecated: Use Reservations slice instead.
-	// +optional
-	Reserved bool `json:"reserved,omitempty"`
-
-	// ReservedAt is the timestamp when the wish was reserved.
-	//
-	// Deprecated: Use Reservations slice instead.
-	// +optional
-	ReservedAt *metav1.Time `json:"reservedAt,omitempty"`
-
-	// ReservationExpires is when the reservation will expire (1-8 weeks from reservedAt).
-	//
-	// Deprecated: Use Reservations slice instead.
-	// +optional
-	ReservationExpires *metav1.Time `json:"reservationExpires,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -148,21 +128,6 @@ type WishList struct {
 	Items []Wish `json:"items"`
 }
 
-// IsReservationExpired checks if the legacy reservation has expired.
-//
-// Deprecated: Use new Reservations slice instead.
-func (w *Wish) IsReservationExpired() bool {
-	if !w.Status.Reserved {
-		return false
-	}
-
-	if w.Status.ReservationExpires == nil {
-		return false
-	}
-
-	return time.Now().After(w.Status.ReservationExpires.Time)
-}
-
 // IsUnlimited returns true if the wish has unlimited quantity (quantity == 0).
 func (w *Wish) IsUnlimited() bool {
 	return w.Spec.Quantity == 0
@@ -179,11 +144,21 @@ func (w *Wish) GetQuantity() int32 {
 	return w.Spec.Quantity
 }
 
-// TotalReserved returns the sum of all reservation quantities.
+// TotalReserved returns the sum of quantities across reservations that have not expired.
+// Expired entries are ignored so they stop holding items once their window closes,
+// even before the reconciler prunes them from the status.
+//
+// The expiry check is inlined rather than reusing ActiveReservations because the card
+// template calls AvailableQuantity in a loop condition, so this runs once per iteration.
 func (w *Wish) TotalReserved() int32 {
+	now := time.Now()
+
 	var total int32
+
 	for _, r := range w.Status.Reservations {
-		total += r.Quantity
+		if r.ExpiresAt.After(now) {
+			total += r.Quantity
+		}
 	}
 
 	return total
@@ -229,17 +204,17 @@ func (w *Wish) IsFullyReserved() bool {
 	return w.AvailableQuantity() == 0
 }
 
-// NextReservationExpiry returns the earliest expiration time among all reservations.
-// Returns nil if there are no reservations.
+// NextReservationExpiry returns the earliest expiration time among reservations
+// that have not expired yet, which is when the wish next needs reconciling.
+// Returns nil if there are none. Entries already past their expiry are skipped:
+// their time lies in the past and would schedule a requeue that never fires.
 func (w *Wish) NextReservationExpiry() *metav1.Time {
-	if len(w.Status.Reservations) == 0 {
-		return nil
-	}
+	active := w.ActiveReservations()
 
 	var earliest *metav1.Time
 
-	for i := range w.Status.Reservations {
-		r := &w.Status.Reservations[i]
+	for i := range active {
+		r := &active[i]
 		if earliest == nil || r.ExpiresAt.Time.Before(earliest.Time) {
 			earliest = &r.ExpiresAt
 		}

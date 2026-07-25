@@ -29,8 +29,6 @@ type WishReconciler struct {
 
 // Reconcile handles the reconciliation of Wish resources.
 // It manages TTL expiration and reservation cleanup.
-//
-//nolint:gocognit // Standard reconcile pattern with migration and cleanup logic
 func (r *WishReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -63,30 +61,6 @@ func (r *WishReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				requeueAfter = ttlRemaining
 			}
 		}
-	}
-
-	// Migration: convert legacy Reserved format to new Reservations slice
-	//nolint:staticcheck // Intentional use of deprecated fields for migration
-	if wish.Status.Reserved && len(wish.Status.Reservations) == 0 {
-		//nolint:staticcheck // Intentional use of deprecated fields for migration
-		if wish.Status.ReservedAt != nil && wish.Status.ReservationExpires != nil {
-			wish.Status.Reservations = []wishlistv1alpha1.Reservation{{
-				Quantity: 1,
-				//nolint:staticcheck // Intentional use of deprecated fields for migration
-				CreatedAt: *wish.Status.ReservedAt,
-				//nolint:staticcheck // Intentional use of deprecated fields for migration
-				ExpiresAt: *wish.Status.ReservationExpires,
-			}}
-			log.Info("Migrated legacy reservation to new format")
-		}
-
-		//nolint:staticcheck // Intentional use of deprecated fields for migration
-		wish.Status.Reserved = false
-		//nolint:staticcheck // Intentional use of deprecated fields for migration
-		wish.Status.ReservedAt = nil
-		//nolint:staticcheck // Intentional use of deprecated fields for migration
-		wish.Status.ReservationExpires = nil
-		statusChanged = true
 	}
 
 	// Clean up expired reservations from the slice

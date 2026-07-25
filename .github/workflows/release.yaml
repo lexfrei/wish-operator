@@ -306,34 +306,18 @@ jobs:
           CHANGELOG_FILE=$(mktemp)
           echo "[]" > "$CHANGELOG_FILE"
 
-          while IFS= read -r commit; do
-            [ -z "$commit" ] && continue
+          # Assigned rather than piped or substituted into the loop: a failure
+          # inside a process substitution does not reach set -e, so the script
+          # dying would read as "no user-facing changes" on a green step.
+          ENTRIES=$(hack/changelog.sh chart <<< "$COMMITS")
 
-            if [[ "$commit" =~ ^(feat|fix|security|refactor|docs|perf|build)(\([^\)]+\))?:\ (.+)$ ]]; then
-              TYPE="${BASH_REMATCH[1]}"
-              SCOPE="${BASH_REMATCH[2]}"
-              DESC="${BASH_REMATCH[3]}"
-              SCOPE="${SCOPE#\(}"
-              SCOPE="${SCOPE%\)}"
+          while IFS=$'\t' read -r KIND FULL_DESC; do
+            [ -z "$KIND" ] && continue
 
-              case "$TYPE" in
-                feat) KIND="added" ;;
-                fix) KIND="fixed" ;;
-                security) KIND="security" ;;
-                *) KIND="changed" ;;
-              esac
-
-              if [ -n "$SCOPE" ]; then
-                FULL_DESC="${SCOPE}: ${DESC}"
-              else
-                FULL_DESC="${DESC}"
-              fi
-
-              export KIND FULL_DESC
-              yq eval '. += [{"kind": strenv(KIND), "description": strenv(FULL_DESC)}]' \
-                --inplace "$CHANGELOG_FILE"
-            fi
-          done <<< "$COMMITS"
+            export KIND FULL_DESC
+            yq eval '. += [{"kind": strenv(KIND), "description": strenv(FULL_DESC)}]' \
+              --inplace "$CHANGELOG_FILE"
+          done <<< "$ENTRIES"
 
           if [ "$(cat "$CHANGELOG_FILE")" = "[]" ]; then
             echo "No user-facing changes found, skipping changelog annotation"
@@ -469,39 +453,14 @@ jobs:
             COMMITS=$(git log --format="%s" --no-merges)
           fi
 
-          CHANGELOG_SECTION=""
-          while IFS= read -r commit; do
-            [ -z "$commit" ] && continue
-
-            if [[ "$commit" =~ ^(feat|fix|security|refactor|docs|perf|build)(\([^\)]+\))?:\ (.+)$ ]]; then
-              TYPE="${BASH_REMATCH[1]}"
-              SCOPE="${BASH_REMATCH[2]}"
-              DESC="${BASH_REMATCH[3]}"
-              SCOPE="${SCOPE#\(}"; SCOPE="${SCOPE%\)}"
-
-              case "$TYPE" in
-                feat) emoji="✨" ;;
-                fix) emoji="🐛" ;;
-                security) emoji="🔒" ;;
-                *) emoji="🔄" ;;
-              esac
-
-              if [ -n "$SCOPE" ]; then
-                CHANGELOG_SECTION="${CHANGELOG_SECTION}- ${emoji} ${SCOPE}: ${DESC}"$'\n'
-              else
-                CHANGELOG_SECTION="${CHANGELOG_SECTION}- ${emoji} ${DESC}"$'\n'
-              fi
-            fi
-          done <<< "$COMMITS"
-
-          if [ -z "$CHANGELOG_SECTION" ]; then
-            CHANGELOG_SECTION="No user-facing changes in this release."
-          fi
+          export UPGRADE_URL="https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/README.md#upgrading"
+          CHANGELOG_SECTION=$(hack/changelog.sh notes <<< "$COMMITS")
 
           {
             echo "## Changelog"
             echo ""
             echo "${CHANGELOG_SECTION}"
+            echo ""
             echo "## Installation"
             echo ""
             echo "\`\`\`bash"

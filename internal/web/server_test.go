@@ -47,6 +47,7 @@ const (
 	testDirectIP           = "203.0.113.10"
 	testDirectRemoteAddr   = testDirectIP + ":5000"
 	testUnsplittableAddr   = "not-a-host-port"
+	testExpiredResName     = "expired-reservation-wish"
 )
 
 // newTestServer builds a server with the shipped default hop count, so tests
@@ -302,6 +303,144 @@ func TestServer_HandleReserve_FullyReserved(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestServer_HandleReserve_ExpiredReservationDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	// The only reservation has expired but the reconciler has not pruned it yet.
+	// The item must be reservable again rather than answering 409.
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testExpiredResName,
+			Namespace: testNamespace,
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Gift With Stale Reservation",
+			Quantity: 1,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+			Reservations: []wishlistv1alpha1.Reservation{
+				{
+					Quantity:  1,
+					CreatedAt: metav1.NewTime(past.Add(-time.Hour)),
+					ExpiresAt: past,
+				},
+			},
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	form := url.Values{}
+	form.Set("weeks", "2")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/wishes/"+testExpiredResName+"/reserve",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestServer_HandleReserve_ExpiredReservationStillRejectsWhenRestIsHeld(t *testing.T) {
+	t.Parallel()
+
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+
+	// One lapsed reservation plus an active one covering the whole quantity.
+	// Ignoring the lapsed entry must not hand out an item the active one holds.
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mixed-reservation-wish",
+			Namespace: testNamespace,
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Gift With One Stale And One Live Reservation",
+			Quantity: 1,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+			Reservations: []wishlistv1alpha1.Reservation{
+				{Quantity: 1, CreatedAt: past, ExpiresAt: past},
+				{Quantity: 1, CreatedAt: past, ExpiresAt: future},
+			},
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	form := url.Values{}
+	form.Set("weeks", "2")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/wishes/mixed-reservation-wish/reserve",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusConflict, rec.Code)
+}
+
+func TestServer_HandleReserve_ExpiredReservationDoesNotRaiseTheCap(t *testing.T) {
+	t.Parallel()
+
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+
+	// Quantity 3, one active reservation for 1 and one lapsed for 1: two are free,
+	// so asking for all three must be rejected rather than counted against the stale entry.
+	wish := &wishlistv1alpha1.Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "partial-expired-wish",
+			Namespace: testNamespace,
+		},
+		Spec: wishlistv1alpha1.WishSpec{
+			Title:    "Gift With Partial Availability",
+			Quantity: 3,
+		},
+		Status: wishlistv1alpha1.WishStatus{
+			Active: true,
+			Reservations: []wishlistv1alpha1.Reservation{
+				{Quantity: 1, CreatedAt: past, ExpiresAt: future},
+				{Quantity: 1, CreatedAt: past, ExpiresAt: past},
+			},
+		},
+	}
+
+	srv := newTestServer(t, wish)
+	handler := srv.Handler()
+
+	form := url.Values{}
+	form.Set("weeks", "2")
+	form.Set("quantity", "3")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/wishes/partial-expired-wish/reserve",
+		strings.NewReader(form.Encode()),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestServer_HandleReserve_QuantityExceedsAvailable(t *testing.T) {
