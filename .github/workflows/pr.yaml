@@ -81,6 +81,22 @@ jobs:
             echo "\`trivy-fs-results\` artifact instead: ${{ steps.trivy_artifact.outputs.artifact-url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Trivy above is report-only; this is the step that turns a reachable
+      # vulnerability into a red required check. It runs on !cancelled() so a
+      # Trivy failure cannot silently skip the gate, and last so it never
+      # disturbs the SARIF upload and artifact fallback. No templ step needed:
+      # the generated files are committed.
+      - name: Run govulncheck
+        if: ${{ !cancelled() }}
+        # renovate: datasource=go depName=golang.org/x/vuln
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
