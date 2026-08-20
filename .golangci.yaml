@@ -18,6 +18,14 @@ linters:
     - lll
     - errchkjson
     - ireturn
+    # Disabled only until staticcheck can analyse Go 1.27. Both released
+    # versions crash on it: honnef.co/go/tools v0.7.0 (shipped in
+    # golangci-lint 2.12.2) panics building IR for the standard library's
+    # internal/poll ("unexpected expr: *ast.KeyValueExpr"), and v0.8.0-rc.1
+    # (2.13.0) panics in the nilness analyser on the sentry package that
+    # cockroachdb/errors pulls in (dominikh/go-tools#1725). Re-enable as soon
+    # as a golangci-lint release survives a run here.
+    - staticcheck
   settings:
     dupl:
       threshold: 100
