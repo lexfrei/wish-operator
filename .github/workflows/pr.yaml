@@ -119,6 +119,13 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
+          # Build the linter from source with the Go that setup-go just installed.
+          # A released binary is built with whatever Go its own release used, and
+          # golangci-lint refuses to run when that is older than the go directive
+          # in go.mod ("the Go language version used to build golangci-lint is
+          # lower than the targeted Go version"). Downloading a binary therefore
+          # blocks every Go release until golangci-lint ships one built with it.
+          install-mode: goinstall
           # renovate: datasource=github-releases depName=golangci/golangci-lint
           version: v2.12.2
           args: --timeout=5m
