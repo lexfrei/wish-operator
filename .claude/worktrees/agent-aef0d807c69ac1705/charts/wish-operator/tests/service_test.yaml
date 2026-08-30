@@ -1,0 +1,117 @@
+suite: service tests
+templates:
+  - service.yaml
+tests:
+  # Basic structure
+  - it: should create service
+    asserts:
+      - isKind:
+          of: Service
+      - isAPIVersion:
+          of: v1
+
+  - it: should have correct name
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should use fullnameOverride
+    set:
+      fullnameOverride: custom-service
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-service
+
+  - it: should have correct labels
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: wish-operator
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm
+
+  # Service type
+  - it: should be ClusterIP by default
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: should support NodePort type
+    set:
+      service:
+        type: NodePort
+    asserts:
+      - equal:
+          path: spec.type
+          value: NodePort
+
+  - it: should support LoadBalancer type
+    set:
+      service:
+        type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  # Ports
+  - it: should expose port 8080 by default
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 8080
+
+  - it: should target http port
+    asserts:
+      - equal:
+          path: spec.ports[0].targetPort
+          value: http
+
+  - it: should use TCP protocol
+    asserts:
+      - equal:
+          path: spec.ports[0].protocol
+          value: TCP
+
+  - it: should name port as http
+    asserts:
+      - equal:
+          path: spec.ports[0].name
+          value: http
+
+  - it: should allow custom port
+    set:
+      service:
+        port: 9090
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 9090
+
+  # Selectors
+  - it: should have correct selector for app name
+    asserts:
+      - equal:
+          path: spec.selector["app.kubernetes.io/name"]
+          value: wish-operator
+
+  - it: should have correct selector for instance
+    asserts:
+      - equal:
+          path: spec.selector["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+
+  - it: should use nameOverride in selector
+    set:
+      nameOverride: custom-name
+    asserts:
+      - equal:
+          path: spec.selector["app.kubernetes.io/name"]
+          value: custom-name

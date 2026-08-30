@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":prHourlyLimitNone",
+    ":prConcurrentLimitNone"
+  ],
+  "labels": ["dependencies"],
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "Automerge minor and patch updates",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge all GitHub Actions updates including major",
+      "matchManagers": ["github-actions"],
+      "automerge": true
+    },
+    {
+      "description": "Allow Renovate to bump go directive in go.mod",
+      "matchManagers": ["gomod"],
+      "matchDepNames": ["go"],
+      "matchDepTypes": ["golang"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Keep controller-runtime in lockstep with the Kubernetes libraries (a split bump breaks compilation: controller-runtime vX needs a matching client-go)",
+      "groupName": "kubernetes",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["sigs.k8s.io/controller-runtime", "k8s.io/**"]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Bump tool versions annotated with a renovate comment in workflows",
+      "customType": "regex",
+      "fileMatch": ["\\.github/workflows/.*\\.ya?ml$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\n.*?[\"']?(?<currentValue>v?\\d+\\.\\d+\\.\\d+)[\"']?"
+      ]
+    },
+    {
+      "description": "Bump tool versions annotated with a renovate comment in the Makefile",
+      "customType": "regex",
+      "fileMatch": ["^Makefile$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\n.*?[\"']?(?<currentValue>v?\\d+\\.\\d+\\.\\d+)[\"']?"
+      ]
+    }
+  ]
+}

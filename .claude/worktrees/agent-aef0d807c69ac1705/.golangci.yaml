@@ -11,11 +11,9 @@ linters:
   disable:
     - depguard
     - exhaustruct
-    - exhaustruct_v5
     - gochecknoinits
     # Superseded by gomodguard_v2, which "default: all" already enables.
     - gomodguard
-    - gomodguard_v2
     - wsl
     - lll
     - errchkjson

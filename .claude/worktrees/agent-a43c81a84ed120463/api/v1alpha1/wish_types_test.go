@@ -1,0 +1,728 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2025 Aleksei Sviridkin
+
+package v1alpha1
+
+import (
+	"math"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// Shared test fixtures to avoid duplicated string literals.
+const (
+	testShop1URL           = "https://shop1.com/buy"
+	testShop2URL           = "https://shop2.com/buy"
+	testTagElectronics     = "electronics"
+	testTagGadgets         = "gadgets"
+	testTagBirthday        = "birthday"
+	testTagChristmas       = "christmas"
+	testCaseNoReservations = "no reservations"
+	testCaseSingleRes      = "single reservation"
+	testCasePartiallyRes   = "partially reserved"
+)
+
+func TestWishSpec_Fields(t *testing.T) {
+	t.Parallel()
+
+	spec := WishSpec{
+		Title:        "Test Gift",
+		ImageURL:     "https://example.com/image.jpg",
+		OfficialURL:  "https://example.com/product",
+		PurchaseURLs: []string{testShop1URL, testShop2URL},
+		MSRP:         "₽ 19900",
+		Tags:         []string{testTagElectronics, testTagGadgets},
+		ContextTags:  []string{testTagBirthday, testTagChristmas},
+		Description:  "I really want this because...",
+		Priority:     5,
+		TTL:          &metav1.Duration{Duration: 30 * 24 * time.Hour},
+	}
+
+	assert.Equal(t, "Test Gift", spec.Title)
+	assert.Equal(t, "https://example.com/image.jpg", spec.ImageURL)
+	assert.Equal(t, "https://example.com/product", spec.OfficialURL)
+	assert.Equal(t, []string{testShop1URL, testShop2URL}, spec.PurchaseURLs)
+	assert.Equal(t, "₽ 19900", spec.MSRP)
+	assert.Equal(t, []string{testTagElectronics, testTagGadgets}, spec.Tags)
+	assert.Equal(t, []string{testTagBirthday, testTagChristmas}, spec.ContextTags)
+	assert.Equal(t, "I really want this because...", spec.Description)
+	assert.Equal(t, int32(5), spec.Priority)
+	require.NotNil(t, spec.TTL)
+	assert.Equal(t, 30*24*time.Hour, spec.TTL.Duration)
+}
+
+func TestWishStatus_Fields(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	expires := metav1.NewTime(now.Add(7 * 24 * time.Hour))
+
+	status := WishStatus{
+		Reservations: []Reservation{
+			{Quantity: 1, CreatedAt: now, ExpiresAt: expires},
+		},
+		Active: true,
+	}
+
+	require.Len(t, status.Reservations, 1)
+	assert.Equal(t, int32(1), status.Reservations[0].Quantity)
+	assert.Equal(t, now.Time, status.Reservations[0].CreatedAt.Time)
+	assert.Equal(t, expires.Time, status.Reservations[0].ExpiresAt.Time)
+	assert.True(t, status.Active)
+}
+
+func TestWish_DefaultValues(t *testing.T) {
+	t.Parallel()
+
+	wish := &Wish{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-wish",
+			Namespace: "default",
+		},
+		Spec: WishSpec{
+			Title: "Minimal Wish",
+		},
+	}
+
+	// Optional fields should be empty/zero by default
+	assert.Empty(t, wish.Spec.ImageURL)
+	assert.Empty(t, wish.Spec.OfficialURL)
+	assert.Empty(t, wish.Spec.PurchaseURLs)
+	assert.Empty(t, wish.Spec.MSRP)
+	assert.Empty(t, wish.Spec.Tags)
+	assert.Empty(t, wish.Spec.ContextTags)
+	assert.Empty(t, wish.Spec.Description)
+	assert.Equal(t, int32(0), wish.Spec.Priority)
+	assert.Nil(t, wish.Spec.TTL)
+
+	// Status should be empty by default
+	assert.Empty(t, wish.Status.Reservations)
+	assert.False(t, wish.Status.Active)
+}
+
+func TestWish_IsExpired(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		wish     Wish
+		expected bool
+	}{
+		{
+			name: "no TTL set - never expires",
+			wish: Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.NewTime(time.Now().Add(-365 * 24 * time.Hour)),
+				},
+				Spec: WishSpec{TTL: nil},
+			},
+			expected: false,
+		},
+		{
+			name: "within TTL",
+			wish: Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour)),
+				},
+				Spec: WishSpec{TTL: &metav1.Duration{Duration: 24 * time.Hour}},
+			},
+			expected: false,
+		},
+		{
+			name: "TTL expired",
+			wish: Wish{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.NewTime(time.Now().Add(-48 * time.Hour)),
+				},
+				Spec: WishSpec{TTL: &metav1.Duration{Duration: 24 * time.Hour}},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, tt.wish.IsExpired())
+		})
+	}
+}
+
+func TestWish_GetQuantity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity int32
+		expected int32
+	}{
+		{
+			name:     "negative defaults to 1",
+			quantity: -1,
+			expected: 1,
+		},
+		{
+			name:     "explicit 1",
+			quantity: 1,
+			expected: 1,
+		},
+		{
+			name:     "explicit 5",
+			quantity: 5,
+			expected: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{Spec: WishSpec{Quantity: tt.quantity}}
+			assert.Equal(t, tt.expected, wish.GetQuantity())
+		})
+	}
+}
+
+func TestWish_TotalReserved(t *testing.T) {
+	t.Parallel()
+
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	tests := []struct {
+		name         string
+		reservations []Reservation
+		expected     int32
+	}{
+		{
+			name:         testCaseNoReservations,
+			reservations: nil,
+			expected:     0,
+		},
+		{
+			name:         "empty slice",
+			reservations: []Reservation{},
+			expected:     0,
+		},
+		{
+			name: testCaseSingleRes,
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+			},
+			expected: 2,
+		},
+		{
+			name: "multiple reservations",
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+				{Quantity: 3, ExpiresAt: future},
+				{Quantity: 1, ExpiresAt: future},
+			},
+			expected: 6,
+		},
+		{
+			name: "expired reservation is not counted",
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: past},
+			},
+			expected: 0,
+		},
+		{
+			name: "only active reservations are counted",
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+				{Quantity: 3, ExpiresAt: past},
+			},
+			expected: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{Status: WishStatus{Reservations: tt.reservations}}
+			assert.Equal(t, tt.expected, wish.TotalReserved())
+		})
+	}
+}
+
+func TestWish_AvailableQuantity(t *testing.T) {
+	t.Parallel()
+
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		expected     int32
+	}{
+		{
+			name:         "all available (default quantity)",
+			quantity:     1,
+			reservations: nil,
+			expected:     1,
+		},
+		{
+			name:         "all available (explicit quantity)",
+			quantity:     5,
+			reservations: nil,
+			expected:     5,
+		},
+		{
+			name:     testCasePartiallyRes,
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+			},
+			expected: 3,
+		},
+		{
+			name:     "fully reserved",
+			quantity: 3,
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+				{Quantity: 1, ExpiresAt: future},
+			},
+			expected: 0,
+		},
+		{
+			name:     "over-reserved (edge case)",
+			quantity: 2,
+			reservations: []Reservation{
+				{Quantity: 3, ExpiresAt: future},
+			},
+			expected: 0,
+		},
+		{
+			name:     "expired reservation frees the item back up",
+			quantity: 1,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: past},
+			},
+			expected: 1,
+		},
+		{
+			name:     "one active and one expired against quantity 2",
+			quantity: 2,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: future},
+				{Quantity: 1, ExpiresAt: past},
+			},
+			expected: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec:   WishSpec{Quantity: tt.quantity},
+				Status: WishStatus{Reservations: tt.reservations},
+			}
+			assert.Equal(t, tt.expected, wish.AvailableQuantity())
+		})
+	}
+}
+
+func TestWish_ActiveReservations(t *testing.T) {
+	t.Parallel()
+
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	tests := []struct {
+		name         string
+		reservations []Reservation
+		expectedLen  int
+	}{
+		{
+			name:         testCaseNoReservations,
+			reservations: nil,
+			expectedLen:  0,
+		},
+		{
+			name: "all active",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: future},
+				{Quantity: 2, ExpiresAt: future},
+			},
+			expectedLen: 2,
+		},
+		{
+			name: "all expired",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: past},
+				{Quantity: 2, ExpiresAt: past},
+			},
+			expectedLen: 0,
+		},
+		{
+			name: "mixed",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: future},
+				{Quantity: 2, ExpiresAt: past},
+				{Quantity: 3, ExpiresAt: future},
+			},
+			expectedLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{Status: WishStatus{Reservations: tt.reservations}}
+			active := wish.ActiveReservations()
+			assert.Len(t, active, tt.expectedLen)
+		})
+	}
+}
+
+func TestWish_IsFullyReserved(t *testing.T) {
+	t.Parallel()
+
+	future := metav1.NewTime(time.Now().Add(time.Hour))
+	past := metav1.NewTime(time.Now().Add(-time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		expected     bool
+	}{
+		{
+			name:         "not reserved at all",
+			quantity:     3,
+			reservations: nil,
+			expected:     false,
+		},
+		{
+			name:     testCasePartiallyRes,
+			quantity: 3,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: future},
+			},
+			expected: false,
+		},
+		{
+			name:     "exactly fully reserved",
+			quantity: 3,
+			reservations: []Reservation{
+				{Quantity: 2, ExpiresAt: future},
+				{Quantity: 1, ExpiresAt: future},
+			},
+			expected: true,
+		},
+		{
+			name:     "default quantity fully reserved",
+			quantity: 1,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: future},
+			},
+			expected: true,
+		},
+		{
+			name:     "expired reservation no longer holds the item",
+			quantity: 1,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: past},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec:   WishSpec{Quantity: tt.quantity},
+				Status: WishStatus{Reservations: tt.reservations},
+			}
+			assert.Equal(t, tt.expected, wish.IsFullyReserved())
+		})
+	}
+}
+
+func TestWish_NextReservationExpiry(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	in1Hour := metav1.NewTime(now.Add(time.Hour))
+	in2Hours := metav1.NewTime(now.Add(2 * time.Hour))
+	in30Min := metav1.NewTime(now.Add(30 * time.Minute))
+	hourAgo := metav1.NewTime(now.Add(-time.Hour))
+
+	tests := []struct {
+		name         string
+		reservations []Reservation
+		expectNil    bool
+		expectedTime *metav1.Time
+	}{
+		{
+			name:         testCaseNoReservations,
+			reservations: nil,
+			expectNil:    true,
+		},
+		{
+			name: "only expired reservations",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: hourAgo},
+			},
+			expectNil: true,
+		},
+		{
+			name: "expired entry is skipped in favour of an active one",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: hourAgo},
+				{Quantity: 2, ExpiresAt: in1Hour},
+			},
+			expectNil:    false,
+			expectedTime: &in1Hour,
+		},
+		{
+			name: testCaseSingleRes,
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: in1Hour},
+			},
+			expectNil:    false,
+			expectedTime: &in1Hour,
+		},
+		{
+			name: "multiple reservations - finds earliest",
+			reservations: []Reservation{
+				{Quantity: 1, ExpiresAt: in2Hours},
+				{Quantity: 2, ExpiresAt: in30Min},
+				{Quantity: 1, ExpiresAt: in1Hour},
+			},
+			expectNil:    false,
+			expectedTime: &in30Min,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{Status: WishStatus{Reservations: tt.reservations}}
+			result := wish.NextReservationExpiry()
+			if tt.expectNil {
+				assert.Nil(t, result)
+			} else {
+				require.NotNil(t, result)
+				assert.Equal(t, tt.expectedTime.Time, result.Time)
+			}
+		})
+	}
+}
+
+func TestWish_IsUnlimited(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity int32
+		want     bool
+	}{
+		{
+			name:     "quantity 0 is unlimited",
+			quantity: 0,
+			want:     true,
+		},
+		{
+			name:     "quantity 1 is not unlimited",
+			quantity: 1,
+			want:     false,
+		},
+		{
+			name:     "quantity 5 is not unlimited",
+			quantity: 5,
+			want:     false,
+		},
+		{
+			name:     "negative quantity is not unlimited",
+			quantity: -1,
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+			}
+			assert.Equal(t, tt.want, wish.IsUnlimited())
+		})
+	}
+}
+
+func TestWish_GetQuantity_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		quantity int32
+		want     int32
+	}{
+		{
+			name:     "explicit 0 returns 0 (unlimited)",
+			quantity: 0,
+			want:     0,
+		},
+		{
+			name:     "unset (0) with default=1 should be 1",
+			quantity: 0,
+			want:     0, // Note: in practice kubebuilder default=1 will set it to 1
+		},
+		{
+			name:     "quantity 1 returns 1",
+			quantity: 1,
+			want:     1,
+		},
+		{
+			name:     "quantity 5 returns 5",
+			quantity: 5,
+			want:     5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+			}
+			assert.Equal(t, tt.want, wish.GetQuantity())
+		})
+	}
+}
+
+func TestWish_AvailableQuantity_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	futureExpiry := metav1.NewTime(now.Add(24 * time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		wantLarge    bool // true if should return MaxInt32
+		wantExact    int32
+	}{
+		{
+			name:      "unlimited with no reservations returns MaxInt32",
+			quantity:  0,
+			wantLarge: true,
+		},
+		{
+			name:     "unlimited with reservations still returns MaxInt32",
+			quantity: 0,
+			reservations: []Reservation{
+				{Quantity: 5, CreatedAt: now, ExpiresAt: futureExpiry},
+				{Quantity: 10, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			wantLarge: true,
+		},
+		{
+			name:      "quantity 5 with no reservations returns 5",
+			quantity:  5,
+			wantExact: 5,
+		},
+		{
+			name:     "quantity 5 with 2 reserved returns 3",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 2, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			wantExact: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+				Status: WishStatus{
+					Reservations: tt.reservations,
+				},
+			}
+			result := wish.AvailableQuantity()
+			if tt.wantLarge {
+				assert.Equal(t, int32(math.MaxInt32), result, "unlimited should saturate at math.MaxInt32")
+			} else {
+				assert.Equal(t, tt.wantExact, result)
+			}
+		})
+	}
+}
+
+func TestWish_IsFullyReserved_Unlimited(t *testing.T) {
+	t.Parallel()
+
+	now := metav1.Now()
+	futureExpiry := metav1.NewTime(now.Add(24 * time.Hour))
+
+	tests := []struct {
+		name         string
+		quantity     int32
+		reservations []Reservation
+		want         bool
+	}{
+		{
+			name:     "unlimited is never fully reserved",
+			quantity: 0,
+			want:     false,
+		},
+		{
+			name:     "unlimited with many reservations still not fully reserved",
+			quantity: 0,
+			reservations: []Reservation{
+				{Quantity: 100, CreatedAt: now, ExpiresAt: futureExpiry},
+				{Quantity: 200, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: false,
+		},
+		{
+			name:     "quantity 5 with 5 reserved is fully reserved",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 5, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: true,
+		},
+		{
+			name:     "quantity 5 with 3 reserved is not fully reserved",
+			quantity: 5,
+			reservations: []Reservation{
+				{Quantity: 3, CreatedAt: now, ExpiresAt: futureExpiry},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wish := &Wish{
+				Spec: WishSpec{
+					Quantity: tt.quantity,
+				},
+				Status: WishStatus{
+					Reservations: tt.reservations,
+				},
+			}
+			assert.Equal(t, tt.want, wish.IsFullyReserved())
+		})
+	}
+}

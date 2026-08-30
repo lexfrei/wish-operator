@@ -1,0 +1,67 @@
+suite: notes tests
+templates:
+  - NOTES.txt
+tests:
+  - it: should warn when a gateway is in front but no hops are declared
+    set:
+      httpRoute:
+        enabled: true
+      operator:
+        trustedProxyHops: 0
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING: this release is reachable through a proxy or load balancer"
+
+  - it: should not warn once the hop count is declared
+    set:
+      httpRoute:
+        enabled: true
+      operator:
+        trustedProxyHops: 1
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "WARNING"
+
+  - it: should warn for a LoadBalancer service without declared hops
+    set:
+      service:
+        type: LoadBalancer
+      operator:
+        trustedProxyHops: 0
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING"
+
+  - it: should warn for a NodePort service without declared hops
+    set:
+      service:
+        type: NodePort
+      operator:
+        trustedProxyHops: 0
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "WARNING"
+
+  - it: should not warn without a gateway or an exposed service
+    set:
+      httpRoute:
+        enabled: false
+      service:
+        type: ClusterIP
+    asserts:
+      - notMatchRegex:
+          path: raw
+          pattern: "WARNING"
+
+  - it: should report the watched namespace
+    set:
+      operator:
+        namespace: wishlist-ns
+    asserts:
+      - matchRegex:
+          path: raw
+          pattern: "watching namespace wishlist-ns"

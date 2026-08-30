@@ -1,0 +1,235 @@
+suite: rbac tests
+templates:
+  - rbac.yaml
+tests:
+  # ClusterRole tests
+  - it: should create ClusterRole
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: ClusterRole
+      - isAPIVersion:
+          of: rbac.authorization.k8s.io/v1
+
+  - it: should have correct ClusterRole name
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should have correct labels on ClusterRole
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: wish-operator
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+
+  # Wishes permissions
+  - it: should have full permissions for wishes
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes
+            verbs:
+              - create
+              - delete
+              - get
+              - list
+              - patch
+              - update
+              - watch
+
+  - it: should have permissions for wishes/status
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes/status
+            verbs:
+              - get
+              - patch
+              - update
+
+  - it: should have permissions for wishes/finalizers
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes/finalizers
+            verbs:
+              - update
+
+  # ClusterRoleBinding tests
+  - it: should create ClusterRoleBinding
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: ClusterRoleBinding
+      - isAPIVersion:
+          of: rbac.authorization.k8s.io/v1
+
+  - it: should have correct ClusterRoleBinding name
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should reference correct ClusterRole
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: roleRef.apiGroup
+          value: rbac.authorization.k8s.io
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should bind to correct service account
+    documentIndex: 1
+    asserts:
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: RELEASE-NAME-wish-operator
+            namespace: NAMESPACE
+
+  - it: should use custom service account name
+    documentIndex: 1
+    set:
+      serviceAccount:
+        name: custom-sa
+    asserts:
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: custom-sa
+            namespace: NAMESPACE
+
+  - it: should use fullnameOverride for ClusterRole
+    documentIndex: 0
+    set:
+      fullnameOverride: my-operator
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-operator
+
+  - it: should use fullnameOverride for ClusterRoleBinding
+    documentIndex: 1
+    set:
+      fullnameOverride: my-operator
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-operator
+      - equal:
+          path: roleRef.name
+          value: my-operator
+
+  # Leader election permissions
+  - it: should not create leader election Role by default
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should grant lease access when leader election is enabled
+    set:
+      operator.leaderElection: true
+    asserts:
+      - hasDocuments:
+          count: 4
+      - containsDocument:
+          kind: Role
+          apiVersion: rbac.authorization.k8s.io/v1
+          name: RELEASE-NAME-wish-operator-leader-election
+          any: true
+      - containsDocument:
+          kind: RoleBinding
+          apiVersion: rbac.authorization.k8s.io/v1
+          name: RELEASE-NAME-wish-operator-leader-election
+          any: true
+
+  - it: should allow the lease verbs controller-runtime needs
+    documentIndex: 2
+    set:
+      operator.leaderElection: true
+    asserts:
+      - equal:
+          path: rules[0].apiGroups[0]
+          value: coordination.k8s.io
+      - equal:
+          path: rules[0].resources[0]
+          value: leases
+      - contains:
+          path: rules[0].verbs
+          content: create
+      - contains:
+          path: rules[0].verbs
+          content: update
+      - contains:
+          path: rules[0].verbs
+          content: get
+      - equal:
+          path: rules[1].resources[0]
+          value: events
+      - contains:
+          path: rules[1].verbs
+          content: create
+      - contains:
+          path: rules[1].verbs
+          content: patch
+
+  - it: should bind the leader election Role to the operator service account
+    documentIndex: 3
+    set:
+      operator.leaderElection: true
+    asserts:
+      - equal:
+          path: roleRef.kind
+          value: Role
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-wish-operator-leader-election
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: RELEASE-NAME-wish-operator
+            namespace: NAMESPACE
+
+  - it: should bind leader election to a custom service account name
+    documentIndex: 3
+    set:
+      operator.leaderElection: true
+      serviceAccount:
+        name: custom-sa
+    asserts:
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: custom-sa
+            namespace: NAMESPACE

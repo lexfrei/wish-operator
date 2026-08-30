@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2025 Aleksei Sviridkin
+
+package templates
+
+import (
+	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
+)
+
+templ WishContent(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, lang string) {
+	@FilterBar(allTags, activeTag, lang)
+	<div id="wishes" class="wishes">
+		if len(wishes) == 0 {
+			<div class="empty">
+				if activeTag != "" {
+					<p>{ i18n.T(lang, "empty_filtered") } "{ activeTag }".</p>
+				} else {
+					<p>{ i18n.T(lang, "empty_default") }</p>
+				}
+			</div>
+		} else {
+			for _, wish := range wishes {
+				@WishCard(&wish, lang)
+			}
+		}
+	</div>
+}
