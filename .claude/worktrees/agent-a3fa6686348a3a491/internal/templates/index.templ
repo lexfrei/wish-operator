@@ -1,0 +1,275 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2025 Aleksei Sviridkin
+
+package templates
+
+import (
+	"net/url"
+
+	wishlistv1alpha1 "github.com/lexfrei/wish-operator/api/v1alpha1"
+	"github.com/lexfrei/wish-operator/internal/i18n"
+)
+
+// refreshURL is the /wishes list the error banner reloads after a 409. It
+// carries the active tag so refreshing a filtered list does not silently reset
+// it to "All", and it is built with url.Values so a tag with a space or an
+// ampersand produces a valid query rather than a broken one.
+func refreshURL(lang, activeTag string) string {
+	q := url.Values{}
+	q.Set("lang", lang)
+
+	if activeTag != "" {
+		q.Set("tag", activeTag)
+	}
+
+	return "/wishes?" + q.Encode()
+}
+
+templ FilterBar(allTags []string, activeTag string, lang string) {
+	if len(allTags) > 0 {
+		<div class="filter-bar" id="filter-bar">
+			<span class="filter-label">{ i18n.T(lang, "filter_label") }</span>
+			<a
+				href="/"
+				class={ "filter-chip", templ.KV("active", activeTag == "") }
+				hx-get={ "/wishes?lang=" + lang }
+				hx-target="#wish-content"
+				hx-swap="innerHTML"
+				hx-push-url="/"
+			>{ i18n.T(lang, "filter_all") }</a>
+			for _, tag := range allTags {
+				<a
+					href={ templ.SafeURL("/?tag=" + tag) }
+					class={ "filter-chip", templ.KV("active", activeTag == tag) }
+					hx-get={ "/wishes?tag=" + tag + "&lang=" + lang }
+					hx-target="#wish-content"
+					hx-swap="innerHTML"
+					hx-push-url={ "/?tag=" + tag }
+				>{ tag }</a>
+			}
+		</div>
+	}
+}
+
+templ Index(wishes []wishlistv1alpha1.Wish, allTags []string, activeTag string, lang string) {
+	<!DOCTYPE html>
+	<html lang={ lang }>
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ i18n.T(lang, "page_title") }</title>
+			<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+			<script>
+				(function() {
+					const theme = localStorage.getItem('theme');
+					if (theme === 'dark' || (theme === 'auto' || !theme) && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+						document.documentElement.setAttribute('data-theme', 'dark');
+					}
+				})();
+			</script>
+			<style>
+				:root {
+					--bg-primary: #f5f5f5;
+					--bg-card: #ffffff;
+					--text-primary: #333333;
+					--text-secondary: #6b7280;
+					--text-muted: #374151;
+					--border-color: #d1d5db;
+					--border-hover: #9ca3af;
+					--accent-color: #2563eb;
+					--accent-hover: #1d4ed8;
+					--tag-bg: #e5e7eb;
+					--tag-context-bg: #dbeafe;
+					--tag-context-text: #1d4ed8;
+					--reserved-bg: #fef3c7;
+					--reserved-text: #92400e;
+					--stars-color: #fbbf24;
+					--chip-bg: #ffffff;
+					--chip-hover: #f3f4f6;
+					--shadow: rgba(0,0,0,0.1);
+					--footer-border: #e5e7eb;
+				}
+				[data-theme="dark"] {
+					--bg-primary: #1a1a2e;
+					--bg-card: #16213e;
+					--text-primary: #e4e4e7;
+					--text-secondary: #a1a1aa;
+					--text-muted: #d4d4d8;
+					--border-color: #3f3f46;
+					--border-hover: #52525b;
+					--accent-color: #3b82f6;
+					--accent-hover: #2563eb;
+					--tag-bg: #27272a;
+					--tag-context-bg: #1e3a5f;
+					--tag-context-text: #60a5fa;
+					--reserved-bg: #422006;
+					--reserved-text: #fbbf24;
+					--stars-color: #fbbf24;
+					--chip-bg: #27272a;
+					--chip-hover: #3f3f46;
+					--shadow: rgba(0,0,0,0.3);
+					--footer-border: #3f3f46;
+				}
+				* { box-sizing: border-box; margin: 0; padding: 0; }
+				body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg-primary); padding: 2rem; color: var(--text-primary); transition: background 0.3s, color 0.3s; }
+				.container { max-width: 1200px; margin: 0 auto; }
+				h1 { text-align: center; margin-bottom: 2rem; color: var(--text-primary); }
+				.wishes { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem; }
+				.wish-card { background: var(--bg-card); border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 8px var(--shadow); transition: background 0.3s; }
+				.wish-card img { width: 100%; height: 200px; object-fit: contain; border-radius: 8px; margin-bottom: 1rem; }
+				.wish-card h2 { font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text-primary); }
+				.wish-card h2 a { color: var(--accent-color); text-decoration: none; }
+				.wish-card h2 a:hover { text-decoration: underline; }
+				.wish-card .price { font-size: 1.5rem; font-weight: bold; color: var(--accent-color); margin-bottom: 0.5rem; }
+				.wish-card .stars { color: var(--stars-color); margin-bottom: 0.5rem; }
+				.wish-card .tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+				.wish-card .tag { background: var(--tag-bg); color: var(--text-secondary); padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.875rem; }
+				.wish-card .context-tag { background: var(--tag-context-bg); color: var(--tag-context-text); }
+				.wish-card .description { color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem; }
+				.wish-card .purchase-links { margin-bottom: 1rem; font-size: 0.875rem; color: var(--text-secondary); }
+				.wish-card .purchase-links a { color: var(--accent-color); margin-left: 0.25rem; }
+				.wish-card .reserve-form { display: flex; gap: 0.5rem; }
+				.wish-card select, .wish-card input, .wish-card button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); }
+				.wish-card input[type="number"] { width: 5.5rem; }
+				.wish-card button { background: var(--accent-color); color: white; border: none; cursor: pointer; }
+				.wish-card button:hover { background: var(--accent-hover); }
+				.wish-card.fully-reserved { opacity: 0.7; }
+				.wish-card .quantity-info { font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
+				.wish-card .quantity-info.unlimited { color: #10b981; font-weight: 600; }
+				.wish-card .reservations-list { margin-bottom: 1rem; }
+				.wish-card .reservation-item { font-size: 0.75rem; color: var(--reserved-text); background: var(--reserved-bg); padding: 0.25rem 0.5rem; border-radius: 4px; margin-bottom: 0.25rem; }
+				.wish-card .fully-reserved-badge { background: var(--reserved-bg); color: var(--reserved-text); padding: 0.5rem 1rem; border-radius: 6px; text-align: center; }
+				.empty { text-align: center; color: var(--text-secondary); padding: 4rem; }
+				.filter-bar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; align-items: center; }
+				.filter-label { font-weight: 500; color: var(--text-muted); margin-right: 0.5rem; }
+				.filter-chip { padding: 0.375rem 0.875rem; border-radius: 9999px; font-size: 0.875rem; cursor: pointer; border: 1px solid var(--border-color); background: var(--chip-bg); color: var(--text-muted); transition: all 0.15s; text-decoration: none; }
+				.filter-chip:hover { background: var(--chip-hover); border-color: var(--border-hover); }
+				.filter-chip.active { background: var(--accent-color); color: white; border-color: var(--accent-color); }
+				#error-banner { margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 6px; background: #b3261e; color: #fff; }
+				#error-banner[hidden] { display: none; }
+				.footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--footer-border); text-align: center; }
+				.footer-row { display: flex; justify-content: center; gap: 1rem; margin-bottom: 0.75rem; }
+				.footer-row:last-child { margin-bottom: 0; }
+				.lang-selector a, .theme-selector button { font-size: 1.5rem; text-decoration: none; opacity: 0.6; transition: opacity 0.15s; background: none; border: none; cursor: pointer; padding: 0.25rem; }
+				.lang-selector a:hover, .theme-selector button:hover { opacity: 1; }
+				.lang-selector a.active, .theme-selector button.active { opacity: 1; }
+			</style>
+		</head>
+		<body>
+			<div class="container">
+				<h1>{ i18n.T(lang, "page_title") }</h1>
+				// htmx drops the body of a non-2xx response, so every refusal the
+				// server explains lands here instead of being swapped into a card.
+				// The script cannot reach i18n, so the strings it needs when the
+				// response carries none of its own are rendered here.
+				<div
+					id="error-banner"
+					role="alert"
+					data-fallback={ i18n.T(lang, "err_no_response") }
+					data-refresh={ refreshURL(lang, activeTag) }
+					hidden
+				></div>
+				<div id="wish-content">
+					@WishContent(wishes, allTags, activeTag, lang)
+				</div>
+				<footer class="footer">
+					<div class="footer-row lang-selector">
+						<a href="/?lang=en" class={ templ.KV("active", lang == "en") } title="English">🇬🇧</a>
+						<a href="/?lang=ru" class={ templ.KV("active", lang == "ru") } title="Русский">🇷🇺</a>
+						<a href="/?lang=zh" class={ templ.KV("active", lang == "zh") } title="中文">🇨🇳</a>
+					</div>
+					<div class="footer-row theme-selector">
+						<button onclick="setTheme('light')" id="theme-light" title="Light">☀️</button>
+						<button onclick="setTheme('auto')" id="theme-auto" title="Auto">🌓</button>
+						<button onclick="setTheme('dark')" id="theme-dark" title="Dark">🌙</button>
+					</div>
+				</footer>
+			</div>
+			<script>
+				(function() {
+					let hideTimer;
+					function banner() {
+						return document.getElementById('error-banner');
+					}
+					function show(text) {
+						const el = banner();
+						if (!el) {
+							return;
+						}
+						// A dropped or timed-out request carries no body, and those are
+						// exactly the cases where saying nothing looks like a dead button.
+						const message = (text || '').trim() || el.dataset.fallback || '';
+						if (!message) {
+							return;
+						}
+						// Unhide before writing: a live region mutated inside a hidden
+						// subtree is not announced.
+						el.hidden = false;
+						el.textContent = message;
+						// The form may sit far down the grid, and an unread message
+						// above the fold is a silent failure of its own.
+						el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+						clearTimeout(hideTimer);
+						hideTimer = setTimeout(function() { el.hidden = true; }, 6000);
+					}
+					document.addEventListener('htmx:afterRequest', function(evt) {
+						// A refusal followed by a success would otherwise leave the
+						// old message hanging over the card that just worked.
+						if (!evt.detail.successful) {
+							return;
+						}
+						const el = banner();
+						if (!el) {
+							return;
+						}
+						// The 409 handler below issues its own refresh, which also
+						// succeeds. Keyed on the path rather than a flag so the failed
+						// POST's own afterRequest cannot consume the signal first: that
+						// refresh must not clear the message that triggered it.
+						const cfg = evt.detail.requestConfig;
+						if (cfg && cfg.path === el.dataset.refresh) {
+							return;
+						}
+						el.hidden = true;
+						clearTimeout(hideTimer);
+					});
+					document.addEventListener('htmx:responseError', function(evt) {
+						// The server's own refusals are text/plain. A gateway between
+						// it and the visitor answers a 502 with an HTML error page, and
+						// that must not land in the banner as markup shown as text, so
+						// anything else falls back to the generic message.
+						const xhr = evt.detail.xhr;
+						const contentType = xhr.getResponseHeader('Content-Type') || '';
+						show(contentType.indexOf('text/plain') === 0 ? xhr.responseText : '');
+						// A 409 means the wish moved on without this page: the card is
+						// still offering a form that cannot succeed, so replace it with
+						// what the server now has.
+						const el = banner();
+						if (evt.detail.xhr.status === 409 && el && el.dataset.refresh) {
+							htmx.ajax('GET', el.dataset.refresh, '#wish-content');
+						}
+					});
+					document.addEventListener('htmx:sendError', function() {
+						show('');
+					});
+					document.addEventListener('htmx:timeout', function() {
+						show('');
+					});
+				})();
+				function setTheme(theme) {
+					localStorage.setItem('theme', theme);
+					updateTheme();
+				}
+				function updateTheme() {
+					const theme = localStorage.getItem('theme') || 'auto';
+					const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+					document.querySelectorAll('.theme-selector button').forEach(btn => btn.classList.remove('active'));
+					document.getElementById('theme-' + theme)?.classList.add('active');
+				}
+				updateTheme();
+				window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateTheme);
+			</script>
+		</body>
+	</html>
+}

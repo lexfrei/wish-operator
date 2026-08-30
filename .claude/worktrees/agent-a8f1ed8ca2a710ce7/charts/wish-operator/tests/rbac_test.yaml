@@ -1,0 +1,150 @@
+suite: rbac tests
+templates:
+  - rbac.yaml
+tests:
+  # ClusterRole tests
+  - it: should create ClusterRole
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: ClusterRole
+      - isAPIVersion:
+          of: rbac.authorization.k8s.io/v1
+
+  - it: should have correct ClusterRole name
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should have correct labels on ClusterRole
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: wish-operator
+      - equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+
+  # Wishes permissions
+  - it: should have full permissions for wishes
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes
+            verbs:
+              - create
+              - delete
+              - get
+              - list
+              - patch
+              - update
+              - watch
+
+  - it: should have permissions for wishes/status
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes/status
+            verbs:
+              - get
+              - patch
+              - update
+
+  - it: should have permissions for wishes/finalizers
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content:
+            apiGroups:
+              - wishlist.k8s.lex.la
+            resources:
+              - wishes/finalizers
+            verbs:
+              - update
+
+  # ClusterRoleBinding tests
+  - it: should create ClusterRoleBinding
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: ClusterRoleBinding
+      - isAPIVersion:
+          of: rbac.authorization.k8s.io/v1
+
+  - it: should have correct ClusterRoleBinding name
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should reference correct ClusterRole
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: roleRef.apiGroup
+          value: rbac.authorization.k8s.io
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+      - equal:
+          path: roleRef.name
+          value: RELEASE-NAME-wish-operator
+
+  - it: should bind to correct service account
+    documentIndex: 1
+    asserts:
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: RELEASE-NAME-wish-operator
+            namespace: NAMESPACE
+
+  - it: should use custom service account name
+    documentIndex: 1
+    set:
+      serviceAccount:
+        name: custom-sa
+    asserts:
+      - contains:
+          path: subjects
+          content:
+            kind: ServiceAccount
+            name: custom-sa
+            namespace: NAMESPACE
+
+  - it: should use fullnameOverride for ClusterRole
+    documentIndex: 0
+    set:
+      fullnameOverride: my-operator
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-operator
+
+  - it: should use fullnameOverride for ClusterRoleBinding
+    documentIndex: 1
+    set:
+      fullnameOverride: my-operator
+    asserts:
+      - equal:
+          path: metadata.name
+          value: my-operator
+      - equal:
+          path: roleRef.name
+          value: my-operator

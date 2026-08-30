@@ -1,0 +1,12 @@
+wish-operator is watching namespace {{ .Values.operator.namespace | default "default" }}.
+
+Rate limiting: {{ .Values.operator.rateLimit | default 30 }} requests per second per client, burst {{ .Values.operator.rateBurst | default 10 }}.
+{{ if and (or .Values.httpRoute.enabled (ne .Values.service.type "ClusterIP")) (not .Values.operator.trustedProxyHops) }}
+WARNING: this release is reachable through a proxy or load balancer but
+operator.trustedProxyHops is 0, so X-Forwarded-For is ignored and every visitor
+reaching the operator from the same address shares one rate limit bucket.
+
+Set operator.trustedProxyHops to the number of proxies that append to
+X-Forwarded-For on the way in: 1 for a single gateway, 2 when a CDN or tunnel
+fronts it. Leave it at 0 only when the service is reached directly.
+{{- end }}

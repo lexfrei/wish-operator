@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- wishlist_v1alpha1_wish.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
