@@ -145,7 +145,7 @@ jobs:
       - name: Setup envtest
         run: |
           # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0
           setup-envtest use
 
       - name: Run tests
