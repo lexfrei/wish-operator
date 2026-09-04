@@ -95,7 +95,7 @@ jobs:
       - name: Run govulncheck
         if: ${{ !cancelled() }}
         # renovate: datasource=go depName=golang.org/x/vuln
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
 
   lint:
     name: Lint
