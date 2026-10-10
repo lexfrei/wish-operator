@@ -28,3 +28,9 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Claude Code agent worktrees: full checkouts of other branches, which
+# every recursive tool then treats as real files. Renovate indexed their
+# Containerfiles and workflows as separate dependencies and opened PRs whose
+# whole diff was a stale copy; helm-docs rewrote their charts.
+.claude/worktrees/
