@@ -90,8 +90,17 @@ jobs:
       # Trivy above is report-only; this is the step that turns a reachable
       # vulnerability into a red required check. It runs on !cancelled() so a
       # Trivy failure cannot silently skip the gate, and last so it never
-      # disturbs the SARIF upload and artifact fallback. No templ step needed:
-      # the generated files are committed.
+      # disturbs the SARIF upload and artifact fallback. The templ steps are
+      # needed even though the generated files are committed: a runtime bump
+      # leaves them referencing removed helpers, and the scan fails to compile.
+      - name: Install templ
+        if: ${{ !cancelled() }}
+        run: go install github.com/a-h/templ/cmd/templ@"$(go list -m -f '{{.Version}}' github.com/a-h/templ)"
+
+      - name: Generate templ files
+        if: ${{ !cancelled() }}
+        run: templ generate
+
       - name: Run govulncheck
         if: ${{ !cancelled() }}
         # renovate: datasource=go depName=golang.org/x/vuln
