@@ -164,7 +164,8 @@ jobs:
           # setup-envtest would otherwise run the suite with no assets at all.
           KUBEBUILDER_ASSETS="$(setup-envtest use -p path)"
           export KUBEBUILDER_ASSETS
-          go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic $(go list ./... | grep -v /test/e2e)
+          mapfile -t pkgs < <(go list ./... | grep -v /test/e2e)
+          go test -v -race -tags=envtest -coverprofile=coverage.out -covermode=atomic "${pkgs[@]}"
 
       - name: Upload coverage
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7
@@ -382,7 +383,7 @@ jobs:
         run: |
           set -euo pipefail
           helm package charts/wish-operator
-          ls -lh *.tgz
+          ls -lh ./*.tgz
 
       - name: Push chart to ttl.sh
         run: |
