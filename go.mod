@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/time v0.16.0
 	k8s.io/apimachinery v0.37.3
-	k8s.io/client-go v0.37.3
+	k8s.io/client-go v11.0.0+incompatible
 	sigs.k8s.io/controller-runtime v0.25.3
 )
 
